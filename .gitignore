@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Next.js (Landing)
+landing/.next/
+Landing/.next/
+out/
+
+# Build / dist
+build/
+dist/
+
+# Env
+.env
+.env*.local
+
+# Debug
+*.log
+.pnpm-debug.log*
+
+# IDE / OS
+.idea
+.vscode
+.DS_Store
+
+# Vercel
+.vercel
