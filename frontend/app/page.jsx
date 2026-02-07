@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { APP_URL } from '../lib/config'
 
 const CURRENCIES = [
   { code: 'USDC', name: 'US Dollar', issuer: 'Circle', flag: '🇺🇸', desc: 'Native gas & primary settlement' },
@@ -32,7 +33,7 @@ function Hero() {
           on Arc.
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-400">
-          Laxo uses Arc’s stablecoin-native L1 and built-in FX engine so you can swap, settle, and send across
+          Laxo uses Arc\'s stablecoin-native L1 and built-in FX engine so you can swap, settle, and send across
           USDC, EURC, JPYC, BRLA, and 7+ more — 24/7, with instant finality.
         </p>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
@@ -74,7 +75,7 @@ function CurrenciesSection() {
             Currencies you can move between on Arc
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-gray-400">
-            Arc’s FX engine and partner stablecoins let you convert and settle across fiat-backed and
+            Arc\'s FX engine and partner stablecoins let you convert and settle across fiat-backed and
             tokenized assets — no volatile gas, no T+2.
           </p>
         </div>
@@ -101,7 +102,7 @@ function CurrenciesSection() {
             Built-in FX engine
           </h3>
           <p className="mt-2 text-gray-400">
-            Arc’s institutional-grade RFQ system gives you price discovery and peer-to-peer onchain settlement
+            Arc\'s institutional-grade RFQ system gives you price discovery and peer-to-peer onchain settlement
             across these stablecoins — 24/7, with sub-second finality. No prefunding delays, no settlement risk.
           </p>
           <ul className="mt-4 flex flex-wrap gap-2">
@@ -119,9 +120,9 @@ function CurrenciesSection() {
 
 function HowItWorks() {
   const steps = [
-    { n: '1', title: 'Connect', desc: 'Link your wallet or use Laxo’s flow. Arc uses USDC for gas — no ETH needed.' },
+    { n: '1', title: 'Connect', desc: 'Link your wallet or use Laxo\'s flow. Arc uses USDC for gas — no ETH needed.' },
     { n: '2', title: 'Choose pair', desc: 'Pick source and destination currency (e.g. USDC → EURC or JPYC → BRLA).' },
-    { n: '3', title: 'Quote & settle', desc: 'Get a live quote via Arc’s FX engine and settle onchain in one step.' },
+    { n: '3', title: 'Quote & settle', desc: 'Get a live quote via Arc\'s FX engine and settle onchain in one step.' },
   ]
   return (
     <section id="how-it-works" className="border-t border-laxo-border py-20 md:py-28">
@@ -156,11 +157,11 @@ function HowItWorks() {
 const INTEGRATIONS = [
   {
     name: 'Yellow',
-    desc: 'Laxo leverages Yellow’s cross-chain clearing network for liquidity and settlement. Yellow’s P2P financial exchange and state channels let us move value across chains without bridging assets — so users get multi-currency flows with instant settlement and lower fees.',
+    desc: 'Laxo leverages Yellow\'s cross-chain clearing network for liquidity and settlement. Yellow\'s P2P financial exchange and state channels let us move value across chains without bridging assets — so users get multi-currency flows with instant settlement and lower fees.',
   },
   {
     name: 'Arc',
-    desc: 'We build on Arc, Circle’s L1 for stablecoin finance. Laxo uses Arc’s built-in FX engine and USDC-native gas so users can swap and settle between USDC, EURC, and partner stablecoins (JPYC, BRLA, and more) with predictable fees and sub-second finality.',
+    desc: 'We build on Arc, Circle\'s L1 for stablecoin finance. Laxo uses Arc\'s built-in FX engine and USDC-native gas so users can swap and settle between USDC, EURC, and partner stablecoins (JPYC, BRLA, and more) with predictable fees and sub-second finality.',
   },
   {
     name: 'ENS',
@@ -177,7 +178,7 @@ function Integrations() {
             Integrations
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-gray-400">
-            Laxo leverages Yellow, Arc, and ENS. Here’s how we use each.
+            Laxo leverages Yellow, Arc, and ENS. Here\'s how we use each.
           </p>
         </div>
         <div className="grid gap-6 md:grid-cols-3">
@@ -212,7 +213,7 @@ function CTA() {
         </p>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
           <Link
-            href="#"
+            href={APP_URL}
             className="rounded-full bg-laxo-accent px-8 py-4 text-base font-semibold text-laxo-bg transition hover:bg-cyan-400"
           >
             Get started

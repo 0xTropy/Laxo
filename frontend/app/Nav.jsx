@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { APP_URL } from '../lib/config'
 
 function LaxoIcon({ className }) {
   return (
@@ -26,7 +27,7 @@ export default function Nav() {
           <Link href="#how-it-works" className="text-sm text-gray-400 transition hover:text-white">How it works</Link>
           <Link href="#integrations" className="text-sm text-gray-400 transition hover:text-white">Integrations</Link>
           <Link
-            href="#get-started"
+            href={APP_URL}
             className="rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg transition hover:bg-cyan-400"
           >
             Get started
@@ -50,7 +51,13 @@ export default function Nav() {
           <Link href="#currencies" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Currencies</Link>
           <Link href="#how-it-works" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>How it works</Link>
           <Link href="#integrations" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Integrations</Link>
-          <Link href="#get-started" className="mt-2 inline-block rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg" onClick={() => setOpen(false)}>Get started</Link>
+          <Link
+            href={APP_URL}
+            className="mt-2 inline-block rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg"
+            onClick={() => setOpen(false)}
+          >
+            Get started
+          </Link>
         </div>
       )}
     </nav>

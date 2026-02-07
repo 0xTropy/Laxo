@@ -17,7 +17,7 @@ const outfit = Outfit({
 
 export const metadata = {
   title: 'Laxo — Currencies, on Arc',
-  description: 'Laxo — Move between currencies on Arc. Stablecoin FX, cross-border, and 24/7 settlement.',
+  description: 'Laxo — Move between currencies. Stablecoin FX, cross-border, and 24/7 settlement.',
 }
 
 export default function RootLayout({ children }) {
