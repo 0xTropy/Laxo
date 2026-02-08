@@ -8,6 +8,7 @@ import ErrorModal from '../../../components/ErrorModal'
 import { useWallet } from '../../../contexts/WalletContext'
 import { subscribeToPrice, getCurrentPrice } from '../../../lib/oracle/priceFeed'
 import { generatePieWalletAddress, generatePieENSName, registerENSName, formatENSName } from '../../../lib/ens/pieWallet'
+import ENSStatus from '../../../components/ENSStatus'
 
 // Currency definitions - matching forex-perps page
 const CURRENCIES = [
@@ -464,10 +465,11 @@ export default function ForexPortfolios() {
                         {pie.name}
                       </h3>
                       {pie.ensName && (
-                        <div className="flex items-center gap-1 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <span className="text-xs text-laxo-accent font-mono">
                             {formatENSName(pie.ensName)}
                           </span>
+                          <ENSStatus ensName={pie.ensName} address={pie.walletAddress} />
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
@@ -807,10 +809,11 @@ function PieDetailModal({ pie, onClose, onLiquidate, calculateValue, loading }) 
           <div>
             <h2 className="text-2xl font-bold text-white mb-1">{pie.name}</h2>
             {pie.ensName && (
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className="text-sm text-laxo-accent font-mono">
                   {pie.ensName}
                 </span>
+                <ENSStatus ensName={pie.ensName} address={pie.walletAddress} />
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(pie.ensName)

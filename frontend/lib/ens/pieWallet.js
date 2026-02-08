@@ -1,7 +1,18 @@
 /**
  * Pie Wallet & ENS Utilities
  * Generates deterministic wallet addresses for pies and ENS names
+ * Uses real ENS registry via viem for resolution
  */
+
+import { createPublicClient, http } from 'viem'
+import { mainnet } from 'viem/chains'
+import { normalize as normalizeENS } from 'viem/ens'
+
+// Create public client for ENS resolution (mainnet only - ENS doesn't exist on Sepolia)
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http(),
+})
 
 /**
  * Generate a deterministic address for a pie wallet
@@ -63,66 +74,94 @@ export function generatePieENSName(userAddress, pieId, pieName = null) {
 }
 
 /**
- * Resolve ENS name to address (simulated for testnet)
- * In production, this would query the ENS registry
- * @param {string} ensName - ENS name (e.g., "pie-abc123.user.eth")
+ * Resolve ENS name to address using real ENS registry
+ * @param {string} ensName - ENS name (e.g., "pie-abc123.user.eth" or "vitalik.eth")
  * @returns {Promise<string|null>} Resolved address or null if not found
  */
 export async function resolveENS(ensName) {
-  // For testnet, we'll simulate resolution by checking localStorage
-  // In production, you'd use ethers.js or web3.js to query ENS registry
   try {
+    // Normalize ENS name (handles emoji, unicode, etc.)
+    const normalizedName = normalizeENS(ensName)
+    
+    // Resolve ENS name to address using viem
+    const address = await publicClient.getEnsAddress({
+      name: normalizedName,
+    })
+    
+    if (address) {
+      // Cache the resolution for faster subsequent lookups
+      localStorage.setItem(`ens_resolution_${ensName}`, address)
+      console.log(`✅ ENS resolved: ${ensName} → ${address}`)
+      return address
+    }
+    
+    return null
+  } catch (error) {
+    console.error('ENS resolution error:', error)
+    // Fallback to cached value if available
     const cached = localStorage.getItem(`ens_resolution_${ensName}`)
     if (cached) {
       return cached
     }
-    
-    // Simulate ENS resolution delay
-    await new Promise(resolve => setTimeout(resolve, 100))
-    
-    // Return null if not found (simulated)
-    return null
-  } catch (error) {
-    console.error('ENS resolution error:', error)
     return null
   }
 }
 
 /**
- * Register ENS name for a pie (simulated for testnet)
- * In production, this would create a transaction to register the subdomain
- * @param {string} ensName - ENS name to register
+ * Register ENS name for a pie
+ * Note: This function tracks the ENS name locally for display purposes.
+ * Actual ENS subdomain registration requires:
+ * 1. User to own the parent domain (e.g., user.eth)
+ * 2. Using ENS resolver contract to set subdomain
+ * 3. Paying gas fees on mainnet
+ * 
+ * For this hackathon, we track the generated ENS names locally and resolve them
+ * if they exist on-chain. Users can manually register subdomains if they own the parent domain.
+ * 
+ * @param {string} ensName - ENS name to register (e.g., "pie-abc123.user.eth")
  * @param {string} address - Address to point the ENS name to
  * @param {string} userAddress - User's main wallet address (for authorization)
  * @returns {Promise<{success: boolean, txHash?: string, message: string}>}
  */
 export async function registerENSName(ensName, address, userAddress) {
-  // For testnet, we'll simulate registration by storing in localStorage
-  // In production, you'd:
-  // 1. Check if user owns the parent domain (e.g., user.eth)
-  // 2. Create a transaction to register the subdomain
-  // 3. Wait for confirmation
-  
   try {
-    // Simulate registration delay
-    await new Promise(resolve => setTimeout(resolve, 500))
+    // Validate ENS name format
+    if (!isValidENSName(ensName)) {
+      return {
+        success: false,
+        message: `Invalid ENS name format: ${ensName}`
+      }
+    }
     
-    // Store in localStorage for testnet simulation
+    // Check if ENS name already resolves on-chain
+    const existingAddress = await resolveENS(ensName)
+    if (existingAddress && existingAddress.toLowerCase() !== address.toLowerCase()) {
+      return {
+        success: false,
+        message: `ENS name ${ensName} already resolves to ${existingAddress}`
+      }
+    }
+    
+    // Store locally for tracking (even if not registered on-chain)
+    // This allows the UI to display the ENS name
     localStorage.setItem(`ens_resolution_${ensName}`, address)
     localStorage.setItem(`ens_owner_${ensName}`, userAddress)
     localStorage.setItem(`ens_registered_${ensName}`, Date.now().toString())
     
-    // Generate mock transaction hash
-    const mockTxHash = `0x${Array.from({ length: 64 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('')}`
+    // Note: Actual on-chain registration would require:
+    // 1. Getting wallet client from wagmi
+    // 2. Calling ENS resolver contract's setSubnodeRecord function
+    // 3. Paying gas fees
+    // For hackathon purposes, we track locally and note that users can register manually
     
-    console.log(`✅ ENS name registered (simulated): ${ensName} → ${address}`)
+    console.log(`✅ ENS name tracked locally: ${ensName} → ${address}`)
+    console.log(`ℹ️  To register on-chain, user needs to own parent domain and use ENS resolver`)
     
     return {
       success: true,
-      txHash: mockTxHash,
-      message: `ENS name ${ensName} registered successfully`
+      txHash: null, // No on-chain transaction yet
+      message: `ENS name ${ensName} tracked locally. To register on-chain, ensure you own the parent domain.`,
+      localOnly: true
     }
   } catch (error) {
     console.error('ENS registration error:', error)
@@ -135,27 +174,38 @@ export async function registerENSName(ensName, address, userAddress) {
 
 /**
  * Get all ENS names owned by a user
+ * Checks both local storage (for tracked names) and on-chain resolution
  * @param {string} userAddress - User's main wallet address
- * @returns {Promise<Array<{name: string, address: string, registeredAt: number}>>}
+ * @returns {Promise<Array<{name: string, address: string, registeredAt: number, onChain: boolean}>>}
  */
 export async function getUserENSNames(userAddress) {
   try {
     const ensNames = []
     const userShort = userAddress.slice(2, 6).toLowerCase()
     
-    // Check localStorage for registered ENS names
+    // Check localStorage for tracked ENS names
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
       if (key && key.startsWith('ens_registered_pie-') && key.includes(userShort)) {
         const ensName = key.replace('ens_registered_', '')
-        const address = localStorage.getItem(`ens_resolution_${ensName}`)
+        const localAddress = localStorage.getItem(`ens_resolution_${ensName}`)
         const registeredAt = parseInt(localStorage.getItem(key) || '0')
         
-        if (address) {
+        if (localAddress) {
+          // Verify if it resolves on-chain
+          let onChainAddress = null
+          try {
+            onChainAddress = await resolveENS(ensName)
+          } catch (err) {
+            // Ignore resolution errors
+          }
+          
           ensNames.push({
             name: ensName,
-            address,
-            registeredAt
+            address: onChainAddress || localAddress,
+            registeredAt,
+            onChain: !!onChainAddress,
+            localOnly: !onChainAddress
           })
         }
       }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { getCurrentPrice } from '../lib/oracle/priceFeed'
 
 export default function CreateMarketModal({ isOpen, onClose, currency, quoteCurrency = 'USD', onCreateMarket }) {
   const [targetPrice, setTargetPrice] = useState('')
@@ -8,6 +9,87 @@ export default function CreateMarketModal({ isOpen, onClose, currency, quoteCurr
   const [customMinutes, setCustomMinutes] = useState('5')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [currentPrice, setCurrentPrice] = useState(null)
+  const [priceLoading, setPriceLoading] = useState(false)
+
+  // Determine decimal places for display based on price magnitude
+  const getDisplayDecimals = (price) => {
+    if (!price) return 4
+    if (price < 0.01) return 6  // Very small prices (like JPY)
+    if (price < 1) return 4     // Small prices (like most forex pairs)
+    return 2                     // Larger prices
+  }
+
+  // Fetch current price when modal opens or currency/quoteCurrency changes
+  useEffect(() => {
+    if (!isOpen || !currency) {
+      setCurrentPrice(null)
+      return
+    }
+
+    const fetchPrice = async () => {
+      setPriceLoading(true)
+      try {
+        const pair = `${currency.code}/${quoteCurrency}`
+        const { price } = await getCurrentPrice(pair)
+        setCurrentPrice(price)
+        
+        // Pre-populate target price with current price
+        // Use the same precision as display to ensure consistency
+        if (!targetPrice) {
+          const decimals = getDisplayDecimals(price)
+          setTargetPrice(price.toFixed(decimals))
+        }
+      } catch (error) {
+        console.error('Error fetching current price:', error)
+        setCurrentPrice(null)
+      } finally {
+        setPriceLoading(false)
+      }
+    }
+
+    fetchPrice()
+  }, [isOpen, currency, quoteCurrency])
+
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setTargetPrice('')
+      setResolutionTime('')
+      setCustomMinutes('5')
+      setUseCustomTime(false)
+      setCurrentPrice(null)
+    }
+  }, [isOpen])
+
+  // Calculate percentage difference
+  const calculatePercentageDiff = () => {
+    if (!targetPrice || !currentPrice) return null
+    
+    const target = parseFloat(targetPrice)
+    if (isNaN(target) || target <= 0) return null
+    
+    // Use the same precision for comparison as we use for display
+    // This ensures the displayed values match the calculation
+    const decimals = getDisplayDecimals(currentPrice)
+    const roundedTarget = parseFloat(target.toFixed(decimals))
+    const roundedCurrent = parseFloat(currentPrice.toFixed(decimals))
+    
+    // If rounded values are the same, return 0 (no meaningful difference)
+    if (roundedTarget === roundedCurrent) return 0
+    
+    // Calculate percentage difference using the actual entered value vs current price
+    // This gives the true prediction difference
+    const diff = target - currentPrice
+    const percentDiff = (diff / currentPrice) * 100
+    
+    // Only return if difference is significant (above 0.01% to avoid rounding noise)
+    if (Math.abs(percentDiff) < 0.01) return 0
+    
+    return percentDiff
+  }
+
+  const percentageDiff = calculatePercentageDiff()
 
   if (!isOpen) return null
 
@@ -116,9 +198,37 @@ export default function CreateMarketModal({ isOpen, onClose, currency, quoteCurr
                 className="w-full rounded-lg border border-laxo-border bg-laxo-bg px-4 py-3 text-base text-white placeholder-gray-500 focus:border-laxo-accent focus:outline-none focus:ring-2 focus:ring-laxo-accent/20"
               />
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {currency && `1 ${currency.symbol} = ? ${quoteCurrency}`}
-            </p>
+            <div className="mt-1">
+              {priceLoading ? (
+                <p className="text-xs text-gray-500 flex items-center gap-2">
+                  <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-500"></span>
+                  Loading current price...
+                </p>
+              ) : currentPrice ? (
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">
+                    1 {currency.symbol} = {currentPrice.toFixed(getDisplayDecimals(currentPrice))} {quoteCurrency}
+                  </p>
+                  {percentageDiff !== null && percentageDiff !== 0 && (
+                    <p className={`text-xs font-semibold ${
+                      percentageDiff > 0 ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {percentageDiff > 0 ? '↑' : '↓'} {Math.abs(percentageDiff).toFixed(2)}% 
+                      {percentageDiff > 0 ? ' above' : ' below'} current price
+                    </p>
+                  )}
+                  {percentageDiff === 0 && (
+                    <p className="text-xs text-gray-400">
+                      Target matches current price
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  {currency && `1 ${currency.symbol} = ? ${quoteCurrency}`}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Resolution Time Options */}

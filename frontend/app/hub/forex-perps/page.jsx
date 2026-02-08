@@ -248,120 +248,163 @@ export default function ForexPerps() {
     const checkMarketResolutions = async () => {
       const now = Math.floor(Date.now() / 1000)
       
-      // Check all markets
-      Array.from(markets.values()).forEach(market => {
-        // Skip if already resolved
-        if (resolvedMarkets.has(market.id)) return
-        
-        // Check if resolution time has passed
-        if (market.resolutionTime <= now) {
-          // Mark as resolved (create new Set to avoid mutation)
-          setResolvedMarkets(prev => new Set([...prev, market.id]))
-          
-          // Get current price to determine winner
-          const currentPrice = currentPrices.get(market.currencyCode)
-          if (currentPrice === undefined) return // Wait for price data
-          
-          // Resolve positions for this market
-          setPositions(prev => {
-            const newPositions = new Map(prev)
-            const marketPositions = Array.from(prev.entries()).filter(([_, pos]) => 
-              pos.marketId === market.id && pos.status === 'active'
-            )
-            
-            // Calculate total pool (all positions in this market)
-            const totalPool = marketPositions.reduce((sum, [_, pos]) => sum + Number(pos.amount), 0)
-            
-            // Separate winners and losers
-            const winners = marketPositions.filter(([_, pos]) => {
-              const isLong = pos.positionType === 'long'
-              return isLong 
-                ? (currentPrice >= market.targetPrice)
-                : (currentPrice < market.targetPrice)
-            })
-            const losers = marketPositions.filter(([_, pos]) => {
-              const isLong = pos.positionType === 'long'
-              return isLong 
-                ? (currentPrice < market.targetPrice)
-                : (currentPrice >= market.targetPrice)
-            })
-            
-            // Include artificial liquidity in the pool
-            const artificialLiquidity = market.artificialLiquidity || { long: 0, short: 0, total: 0 }
-            const totalPoolWithLiquidity = totalPool + artificialLiquidity.total
-            
-            // Calculate payouts: winners split the total pool (including artificial liquidity) proportionally
-            marketPositions.forEach(([key, position]) => {
-              const isLong = position.positionType === 'long'
-              const isWinner = isLong 
-                ? (currentPrice >= market.targetPrice)
-                : (currentPrice < market.targetPrice)
-              
-              if (isWinner && winners.length > 0) {
-                // Winner gets their bet back + proportional share of losers' bets + artificial liquidity
-                const totalWinnerAmount = winners.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
-                const totalLoserAmount = losers.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
-                const winnerShare = Number(position.amount) / totalWinnerAmount
-                
-                // Payout = bet back + share of losers + share of artificial liquidity
-                const payout = Number(position.amount) + 
-                  (totalLoserAmount * winnerShare) + 
-                  (artificialLiquidity.total * winnerShare)
-                
-                newPositions.set(key, {
-                  ...position,
-                  status: 'resolved',
-                  payout: Math.floor(payout),
-                  finalPrice: currentPrice,
-                  resolvedAt: now
-                })
-              } else {
-                // Loser - mark as resolved with no payout
-                newPositions.set(key, {
-                  ...position,
-                  status: 'resolved',
-                  payout: 0,
-                  finalPrice: currentPrice,
-                  resolvedAt: now
-                })
-              }
-            })
-            
-            // Calculate total payout for this user's positions in this market
-            const userPayout = Array.from(newPositions.values())
-              .filter(p => p.marketId === market.id && p.status === 'resolved' && p.payout > 0)
-              .reduce((sum, p) => sum + p.payout, 0)
-            
-            // Persist updated positions
-            savePositions(newPositions)
-            
-            // Add payout to balance if user won
-            if (userPayout > 0 && yellowClient) {
-              const status = yellowClient.getStatus()
-              if (status.isTestWallet) {
-                const currentBalance = BigInt(yellowClient.testBalance.usdc || 0)
-                const payoutBigInt = BigInt(userPayout)
-                yellowClient.testBalance.usdc = (currentBalance + payoutBigInt).toString()
-                
-                // Update wallet balance display
-                updateBalance(yellowClient, isConnected)
-                
-                // Emit balance update
-                yellowClient.emit('balance_update', {
-                  asset: 'usdc',
-                  balance: yellowClient.testBalance.usdc,
-                  total: { ...yellowClient.testBalance }
-                })
-                
-                console.log(`💰 Payout: +${(userPayout / 1000000).toFixed(2)} USDC`)
-              }
+      // Get current positions and find ones that need resolution
+      setPositions(prevPositions => {
+        // Group positions by marketId to resolve them together
+        const positionsByMarket = new Map()
+        Array.from(prevPositions.entries()).forEach(([key, pos]) => {
+          if (pos.status === 'active' && pos.resolutionTime && pos.resolutionTime <= now) {
+            const marketId = pos.marketId || 'unknown'
+            // Skip if already resolved (check current resolvedMarkets state)
+            // Note: We check resolvedMarkets from the closure, which is the value when effect runs
+            // This is safe because the effect re-runs when resolvedMarkets changes
+            if (resolvedMarkets.has(marketId)) return
+            if (!positionsByMarket.has(marketId)) {
+              positionsByMarket.set(marketId, [])
             }
-            
-            return newPositions
+            positionsByMarket.get(marketId).push([key, pos])
+          }
+        })
+        
+        // If no positions need resolution, return unchanged
+        if (positionsByMarket.size === 0) {
+          return prevPositions
+        }
+        
+        let updatedPositions = new Map(prevPositions)
+        const marketsToResolve = []
+        let totalUserPayout = 0
+        
+        // Resolve each market's positions
+        positionsByMarket.forEach((marketPositions, marketId) => {
+          // Get market data if available
+          const market = markets.get(marketId)
+          
+          // Get the first position to extract market info
+          const firstPosition = marketPositions[0][1]
+          const targetPrice = market?.targetPrice || firstPosition.targetPrice
+          const currencyCode = market?.currencyCode || firstPosition.currency
+          
+          if (!targetPrice) {
+            console.warn(`Cannot resolve market ${marketId}: missing target price`)
+            return
+          }
+          
+          // Get current price - try multiple sources
+          let currentPrice = currentPrices.get(currencyCode)
+          if (currentPrice === undefined) {
+            // Try to use the price from the position if available
+            currentPrice = firstPosition.currentPrice
+            if (currentPrice === undefined) {
+              console.warn(`Cannot resolve market ${marketId}: missing current price for ${currencyCode}`)
+              return
+            }
+          }
+          
+          marketsToResolve.push(marketId)
+          
+          // Calculate total pool (all positions in this market)
+          const totalPool = marketPositions.reduce((sum, [_, pos]) => sum + Number(pos.amount), 0)
+          
+          // Separate winners and losers
+          const winners = marketPositions.filter(([_, pos]) => {
+            const isLong = pos.positionType === 'long'
+            return isLong 
+              ? (currentPrice >= targetPrice)
+              : (currentPrice < targetPrice)
+          })
+          const losers = marketPositions.filter(([_, pos]) => {
+            const isLong = pos.positionType === 'long'
+            return isLong 
+              ? (currentPrice < targetPrice)
+              : (currentPrice >= targetPrice)
           })
           
-          console.log(`✅ Market ${market.id} resolved at price ${currentPrice}`)
+          // Include artificial liquidity in the pool if market data is available
+          const artificialLiquidity = market?.artificialLiquidity || { long: 0, short: 0, total: 0 }
+          const totalPoolWithLiquidity = totalPool + artificialLiquidity.total
+          
+          // Calculate payouts: winners split the total pool (including artificial liquidity) proportionally
+          marketPositions.forEach(([key, position]) => {
+            const isLong = position.positionType === 'long'
+            const isWinner = isLong 
+              ? (currentPrice >= targetPrice)
+              : (currentPrice < targetPrice)
+            
+            if (isWinner && winners.length > 0) {
+              // Winner gets their bet back + proportional share of losers' bets + artificial liquidity
+              const totalWinnerAmount = winners.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
+              const totalLoserAmount = losers.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
+              const winnerShare = totalWinnerAmount > 0 ? Number(position.amount) / totalWinnerAmount : 0
+              
+              // Payout = bet back + share of losers + share of artificial liquidity
+              const payout = Number(position.amount) + 
+                (totalLoserAmount * winnerShare) + 
+                (artificialLiquidity.total * winnerShare)
+              
+              const resolvedPosition = {
+                ...position,
+                status: 'resolved',
+                payout: Math.floor(payout),
+                finalPrice: currentPrice,
+                resolvedAt: now
+              }
+              
+              updatedPositions.set(key, resolvedPosition)
+              totalUserPayout += resolvedPosition.payout
+            } else {
+              // Loser - mark as resolved with no payout
+              updatedPositions.set(key, {
+                ...position,
+                status: 'resolved',
+                payout: 0,
+                finalPrice: currentPrice,
+                resolvedAt: now
+              })
+            }
+          })
+          
+          console.log(`✅ Market ${marketId} resolved at price ${currentPrice} (target: ${targetPrice})`)
+        })
+        
+        // Mark markets as resolved
+        if (marketsToResolve.length > 0) {
+          setResolvedMarkets(prev => {
+            const newSet = new Set(prev)
+            marketsToResolve.forEach(marketId => newSet.add(marketId))
+            return newSet
+          })
+          
+          // Add payout to balance if user won
+          if (totalUserPayout > 0 && yellowClient) {
+            const status = yellowClient.getStatus()
+            if (status.isTestWallet) {
+              const currentBalance = BigInt(yellowClient.testBalance.usdc || 0)
+              const payoutBigInt = BigInt(totalUserPayout)
+              yellowClient.testBalance.usdc = (currentBalance + payoutBigInt).toString()
+              
+              // Update wallet balance display
+              updateBalance(yellowClient, isConnected)
+              
+              // Emit balance update
+              yellowClient.emit('balance_update', {
+                asset: 'usdc',
+                balance: yellowClient.testBalance.usdc,
+                total: { ...yellowClient.testBalance }
+              })
+              
+              console.log(`💰 Payout: +${(totalUserPayout / 1000000).toFixed(2)} USDC`)
+            }
+          }
         }
+        
+        // Persist updated positions after all markets are processed
+        if (updatedPositions !== prevPositions) {
+          savePositions(updatedPositions)
+          return updatedPositions
+        }
+        
+        return prevPositions
       })
     }
     
@@ -370,7 +413,7 @@ export default function ForexPerps() {
     checkMarketResolutions() // Check immediately
     
     return () => clearInterval(interval)
-  }, [markets, resolvedMarkets, currentPrices, yellowClient, isConnected])
+  }, [positions, markets, resolvedMarkets, currentPrices, yellowClient, isConnected])
 
 
   // Take a position in a market (memoized to prevent recreation)

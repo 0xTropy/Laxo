@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useWallet } from '../../../contexts/WalletContext'
 import { loadPositions, loadPies, getMarketAddresses } from '../../../lib/wallet/persistence'
 import { getCurrentPrice, subscribeToPrice } from '../../../lib/oracle/priceFeed'
+import ArcIntegration from '../../../components/ArcIntegration'
 
 // Currency definitions - matching forex-perps and forex-portfolios
 const CURRENCIES = [
@@ -200,6 +201,13 @@ export default function Wallet() {
         ) : (
           <div className="mb-8 rounded-2xl border border-laxo-border bg-laxo-card p-6 text-center">
             <p className="text-gray-400">Please connect your wallet to view positions</p>
+          </div>
+        )}
+
+        {/* Arc Integration Section */}
+        {isConnected && (
+          <div className="mb-8">
+            <ArcIntegration />
           </div>
         )}
 

@@ -3,6 +3,7 @@ import './globals.css'
 import Nav from './Nav'
 import Footer from './Footer'
 import { WalletProvider } from '../contexts/WalletContext'
+import { WagmiWrapper } from '../lib/wagmi/provider'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -25,11 +26,13 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${dmSans.variable} ${outfit.variable}`}>
       <body>
-        <WalletProvider>
-          <Nav />
-          <main>{children}</main>
-          <Footer />
-        </WalletProvider>
+        <WagmiWrapper>
+          <WalletProvider>
+            <Nav />
+            <main>{children}</main>
+            <Footer />
+          </WalletProvider>
+        </WagmiWrapper>
       </body>
     </html>
   )

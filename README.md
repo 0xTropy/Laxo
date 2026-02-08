@@ -2,15 +2,22 @@
 
 EthGlobal's 2026 HackMoney Submission
 
-Laxo is a prediction market platform for forex currencies, powered by Yellow Network's state channels for instant off-chain transactions and on-chain settlement via smart contracts.
+Laxo is a prediction market platform for forex currencies, powered by Yellow Network's state channels for instant off-chain transactions, Circle Gateway/Wallets for chain-abstracted USDC operations, and ENS for human-readable addresses.
 
 ## Features
 
 - **10 Currency Prediction Markets**: USDC, EURC, JPYC, BRLA, MXNB, QCAD, AUDF, KRW1, PHPC, ZARU
 - **Yellow SDK Integration**: Off-chain transactions via Nitrolite protocol (ERC-7824)
+- **Circle Gateway & Wallets**: Chain-abstracted USDC operations across multiple blockchains
+- **Arc Network Support**: Deploy and operate on Arc (Circle's L1) with USDC-native gas
+- **ENS Integration**: Human-readable addresses for currency pies
 - **Instant Transactions**: Zero gas fees for position taking through state channels
 - **On-Chain Settlement**: Final settlements executed via smart contracts
 - **Oracle-Based Resolution**: Markets resolve using price oracles
+
+## Architecture
+
+![Architecture](Architecture.png)
 
 ## Project Structure
 
@@ -257,6 +264,70 @@ await session.takePosition('long', '1000000') // 1 USDC
 - **Sandbox** (Testing): `wss://clearnet-sandbox.yellow.com/ws`
 - **Production**: `wss://clearnet.yellow.com/ws`
 
+## Circle Gateway & Wallets Integration
+
+### Overview
+
+Laxo integrates Circle Gateway and Circle Wallets to enable chain-abstracted USDC operations:
+
+- **Circle Gateway**: Cross-chain USDC transfers (<500ms) across multiple blockchains
+- **Circle Wallets**: User-controlled wallet management on Arc and other chains
+- **Arc Network**: Deploy and operate on Circle's L1 with USDC-native gas
+
+### Architecture
+
+```
+User → Circle Wallets API → Create Arc Wallet
+  ↓
+User → Circle Gateway API → Transfer USDC to Arc
+  ↓
+Gateway → Deposit on Source Chain → Mint on Arc
+  ↓
+Unified Balance → View USDC across all chains
+```
+
+### Usage
+
+The Arc integration is available in the Wallet page:
+
+1. Connect your wallet
+2. Click "Initialize Arc Integration" to set up Circle Wallets
+3. Create an Arc wallet for USDC operations
+4. Transfer USDC to/from Arc via Circle Gateway
+5. View unified balance across all supported chains
+
+### Supported Chains
+
+- Ethereum
+- Base
+- Polygon
+- Avalanche
+- Arbitrum
+- Optimism
+- **Arc** (Circle's L1)
+
+### Configuration
+
+Set environment variables for Circle API access:
+
+```env
+NEXT_PUBLIC_CIRCLE_API_KEY=your_circle_api_key
+NEXT_PUBLIC_CIRCLE_ENTITY_SECRET=your_entity_secret  # Optional, for advanced features
+```
+
+Get your API key from [Circle Developer Console](https://console.circle.com/)
+
+### Arc Network Deployment
+
+Deploy contracts to Arc Testnet:
+
+```bash
+cd contracts
+ARC_RPC_URL=https://rpc.testnet.arc.network npm run deploy:arc
+```
+
+**Note**: Arc uses USDC as native gas token. Ensure you have USDC in your wallet for gas fees.
+
 ## Smart Contracts
 
 ### PredictionMarket.sol
@@ -322,11 +393,25 @@ The frontend includes manual testing capabilities:
 - Off-chain position updates
 - Settlement finalized via smart contracts
 
+### ✅ Circle Gateway & Wallets Integration
+- Circle Gateway API client for cross-chain USDC transfers
+- Circle Wallets API client for wallet management
+- Arc network support (Chain ID: 5042002)
+- Unified balance queries across multiple chains
+- Arc deployment scripts and configuration
+
+### ✅ ENS Integration
+- Real ENS resolution via viem/ENS registry
+- ENS name generation for currency pies
+- ENS status indicators (on-chain vs local-only)
+- Wagmi configuration for ENS support
+
 ### ✅ Working Prototype
 - Deployed contracts to Sepolia testnet
-- Frontend integration with Yellow SDK
+- Arc Testnet deployment support
+- Frontend integration with Yellow SDK, Circle Gateway/Wallets, and ENS
 - Prediction markets for 10 currencies
-- Demonstrates instant transactions + on-chain settlement
+- Demonstrates instant transactions + on-chain settlement + cross-chain USDC
 
 ### 📹 Demo Video
 - Create 2-3 minute demo showing:
@@ -494,6 +579,20 @@ MIT
 
 ## Links
 
+### Yellow Network
 - [Yellow Network Documentation](https://docs.yellow.org)
 - [ERC-7824 Specification](https://erc7824.org)
+
+### Circle & Arc
+- [Circle Gateway Documentation](https://developers.circle.com/gateway)
+- [Circle Wallets Documentation](https://developers.circle.com/wallets)
+- [Arc Network Documentation](https://docs.arc.network)
+- [Circle Developer Console](https://console.circle.com/)
+
+### ENS
+- [ENS Documentation](https://docs.ens.domains)
+
+### Development
 - [Hardhat Documentation](https://hardhat.org/docs)
+- [Wagmi Documentation](https://wagmi.sh)
+- [Viem Documentation](https://viem.sh)

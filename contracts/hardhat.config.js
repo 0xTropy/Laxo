@@ -23,6 +23,13 @@ module.exports = {
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 11155111,
     },
+    arcTestnet: {
+      url: process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network",
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 5042002,
+      // Arc uses USDC as native gas token
+      gasPrice: 0, // USDC-based gas
+    },
   },
   etherscan: {
     apiKey: {
