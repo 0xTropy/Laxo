@@ -1,4 +1,4 @@
-import { createAppSessionMessage, parseRPCResponse } from '@erc7824/nitrolite';
+import { createAppSessionMessage } from '@erc7824/nitrolite';
 import { getBlockchainClient } from '../blockchain/blockchainClient';
 
 /**
@@ -200,10 +200,20 @@ export class YellowClient {
 
         this.ws.onmessage = (event) => {
           try {
-            const message = parseRPCResponse(event.data);
+            // Parse WebSocket message (should be JSON)
+            let message;
+            if (typeof event.data === 'string') {
+              message = JSON.parse(event.data);
+            } else {
+              message = event.data;
+            }
             this.handleMessage(message);
           } catch (error) {
             console.error('Error parsing message:', error);
+            // Try to handle as raw message if JSON parsing fails
+            if (this.onMessage) {
+              this.onMessage(event.data);
+            }
           }
         };
 

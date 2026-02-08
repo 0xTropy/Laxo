@@ -170,6 +170,7 @@ contract PredictionMarket is ReentrancyGuard, Ownable {
     /**
      * @notice Resolve the market using oracle price
      * @dev Can be called by owner or after resolution time
+     * @param _finalPrice Final price from oracle (in 8 decimals)
      */
     function resolveMarket(int256 _finalPrice) external {
         require(
@@ -196,6 +197,30 @@ contract PredictionMarket is ReentrancyGuard, Ownable {
         }
         
         emit MarketResolved(_finalPrice, longPayout, shortPayout);
+    }
+    
+    /**
+     * @notice Auto-resolve market using oracle
+     * @dev Fetches price from oracle and resolves automatically
+     */
+    function autoResolveMarket() external {
+        require(
+            msg.sender == owner() || block.timestamp >= market.resolutionTime,
+            "Not authorized or too early"
+        );
+        require(market.state == MarketState.Active, "Market already resolved");
+        require(oracle != address(0), "Oracle not set");
+        
+        // Get price from oracle
+        // Note: This requires implementing IPriceOracle interface
+        // For now, this is a placeholder - implement based on your oracle choice
+        // Example with interface:
+        // IPriceOracle priceOracle = IPriceOracle(oracle);
+        // (uint256 price, uint256 timestamp) = priceOracle.getPrice(market.currencyPair);
+        // resolveMarket(int256(price));
+        
+        // For demo, we'll require manual resolution with price
+        revert("Use resolveMarket() with price parameter");
     }
 
     /**
