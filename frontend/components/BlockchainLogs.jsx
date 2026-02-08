@@ -7,6 +7,12 @@ export default function BlockchainLogs({ isOpen, onClose }) {
   const [logs, setLogs] = useState([])
   const [isConnected, setIsConnected] = useState(false)
   const [status, setStatus] = useState(null)
+  const [filters, setFilters] = useState({
+    showInfo: false, // Hide INFO logs by default
+    showErrors: true,
+    showEvents: true,
+    showTransactions: true
+  })
 
   useEffect(() => {
     if (!isOpen) return
@@ -26,9 +32,19 @@ export default function BlockchainLogs({ isOpen, onClose }) {
       setStatus(client.getStatus())
     }
 
-    // Update logs
+    // Update logs with filters applied
     const updateLogs = () => {
-      setLogs(client.getLogs(50))
+      const allLogs = client.getLogs(50)
+      const filteredLogs = allLogs.filter((log) => {
+        // Filter by level
+        if (log.level === 'info' && !filters.showInfo) return false
+        if (log.level === 'error' && !filters.showErrors) return false
+        if (log.level === 'event' && !filters.showEvents) return false
+        if (log.level === 'transaction' && !filters.showTransactions) return false
+        
+        return true
+      })
+      setLogs(filteredLogs)
     }
     updateLogs()
 
@@ -61,7 +77,7 @@ export default function BlockchainLogs({ isOpen, onClose }) {
       }
       clearInterval(interval)
     }
-  }, [isOpen])
+  }, [isOpen, filters])
 
   const getLevelColor = (level) => {
     switch (level) {
@@ -117,7 +133,7 @@ export default function BlockchainLogs({ isOpen, onClose }) {
                     </span>
                   </div>
                   <span className="text-gray-500">
-                    {logs.length} logs
+                    {logs.length} {logs.length === 1 ? 'log' : 'logs'} shown
                   </span>
                 </div>
               )}
@@ -145,6 +161,49 @@ export default function BlockchainLogs({ isOpen, onClose }) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="px-6 py-3 border-b border-laxo-border bg-laxo-bg/50">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-xs text-gray-500 font-semibold">Filters:</span>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.showInfo}
+                  onChange={(e) => setFilters({ ...filters, showInfo: e.target.checked })}
+                  className="w-4 h-4 rounded border-laxo-border bg-laxo-bg text-laxo-accent focus:ring-laxo-accent focus:ring-2"
+                />
+                <span className="text-xs text-gray-400">INFO</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.showErrors}
+                  onChange={(e) => setFilters({ ...filters, showErrors: e.target.checked })}
+                  className="w-4 h-4 rounded border-laxo-border bg-laxo-bg text-laxo-accent focus:ring-laxo-accent focus:ring-2"
+                />
+                <span className="text-xs text-red-400">ERROR</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.showEvents}
+                  onChange={(e) => setFilters({ ...filters, showEvents: e.target.checked })}
+                  className="w-4 h-4 rounded border-laxo-border bg-laxo-bg text-laxo-accent focus:ring-laxo-accent focus:ring-2"
+                />
+                <span className="text-xs text-cyan-400">EVENT</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.showTransactions}
+                  onChange={(e) => setFilters({ ...filters, showTransactions: e.target.checked })}
+                  className="w-4 h-4 rounded border-laxo-border bg-laxo-bg text-laxo-accent focus:ring-laxo-accent focus:ring-2"
+                />
+                <span className="text-xs text-green-400">TRANSACTION</span>
+              </label>
             </div>
           </div>
 

@@ -18,6 +18,8 @@ module.exports = {
     },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "",
+      // PRIVATE_KEY is only needed if you're deploying contracts
+      // If contracts are already deployed, you can skip this
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 11155111,
     },

@@ -8,7 +8,22 @@ import { sepolia } from 'viem/chains'
 export class BlockchainClient {
   constructor(options = {}) {
     this.chain = options.chain || sepolia
-    this.rpcUrl = options.rpcUrl || `https://sepolia.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY || 'demo'}`
+    
+    // Determine RPC URL with proper fallbacks
+    if (options.rpcUrl) {
+      this.rpcUrl = options.rpcUrl
+    } else if (process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL) {
+      // Use custom RPC URL if provided
+      this.rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL
+    } else if (process.env.NEXT_PUBLIC_INFURA_API_KEY) {
+      // Use Infura if API key is provided
+      this.rpcUrl = `https://sepolia.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_API_KEY}`
+    } else {
+      // Fallback to public Sepolia RPC endpoint (no auth required)
+      // rpc.sepolia.org is discontinued, using PublicNode instead
+      this.rpcUrl = 'https://ethereum-sepolia-rpc.publicnode.com'
+    }
+    
     this.client = null
     this.logs = []
     this.listeners = new Map()
@@ -22,16 +37,26 @@ export class BlockchainClient {
     try {
       this.client = createPublicClient({
         chain: this.chain,
-        transport: http(this.rpcUrl)
+        transport: http(this.rpcUrl, {
+          timeout: 10000, // 10 second timeout
+          retryCount: 2, // Retry twice on failure
+        })
       })
 
-      // Test connection by getting latest block
-      const blockNumber = await this.client.getBlockNumber()
+      // Test connection by getting latest block with timeout
+      const blockNumber = await Promise.race([
+        this.client.getBlockNumber(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 10000)
+        )
+      ])
+      
       this.isConnected = true
       
       this.log('info', `Connected to ${this.chain.name}`, {
         blockNumber: blockNumber.toString(),
-        chainId: this.chain.id
+        chainId: this.chain.id,
+        rpcUrl: this.rpcUrl
       })
 
       return {
@@ -40,8 +65,13 @@ export class BlockchainClient {
         chainName: this.chain.name
       }
     } catch (error) {
-      this.log('error', 'Failed to connect to blockchain', { error: error.message })
-      throw error
+      this.log('error', 'Failed to connect to blockchain', { 
+        error: error.message,
+        rpcUrl: this.rpcUrl 
+      })
+      // Don't throw - allow app to continue without blockchain connection
+      this.isConnected = false
+      return null
     }
   }
 

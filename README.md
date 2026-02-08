@@ -72,11 +72,101 @@ Edit `.env` with your values:
 
 ```env
 SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
-PRIVATE_KEY=your_private_key_here
+# PRIVATE_KEY is only needed if deploying contracts (see below)
+# PRIVATE_KEY=your_private_key_here
 ETHERSCAN_API_KEY=your_etherscan_api_key_here
 ```
 
+**Note**: `PRIVATE_KEY` is only required if you're deploying contracts. If contracts are already deployed and you're just using the frontend, you can skip it.
+
 **Important**: Never commit your `.env` file or private keys to version control.
+
+#### Getting Your API Keys (All Free!)
+
+##### 1. Deployer Key
+
+**Only needed if you're deploying contracts yourself!** If contracts are already deployed and you're just using the frontend with test wallets, you can skip this entirely.
+
+**⚠️ SECURITY WARNING**: Never share your private key or use your main wallet's private key for development!
+
+**Option A: Get Private Key from MetaMask (Easiest)**
+
+1. Open MetaMask browser extension
+2. Click the account icon (circle) at the top
+3. Click "Account Details"
+4. Click "Show Private Key"
+5. Enter your MetaMask password
+6. Copy the private key (starts with `0x...`)
+7. Add it to your `.env` file as `PRIVATE_KEY=0x...`
+
+**Option B: Create a New Test Wallet (Recommended for Safety)**
+
+1. In MetaMask, click the account icon → "Create Account"
+2. Name it something like "Test Deployer"
+3. Follow steps above to get the private key
+4. This keeps your main wallet separate from deployment
+
+**Option B: Generate a Test Wallet**
+
+You can also generate a new wallet specifically for testing:
+
+```bash
+# Using Node.js (one-liner)
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Then use this private key (without `0x` prefix) or add `0x` prefix when adding to `.env`.
+
+**Get Sepolia Testnet ETH:**
+- Visit a Sepolia faucet: https://sepoliafaucet.com or https://faucet.quicknode.com/ethereum/sepolia
+- Send your wallet address to receive free testnet ETH
+
+**Advanced: Encrypted Private Keys (Like Scaffold-ETH 2)**
+
+Some frameworks like scaffold-eth-2 use encrypted private keys with passwords. For this project, we use plain `.env` files for simplicity, but you can:
+- Use password managers to store private keys
+- Use hardware wallets for production deployments
+- Use CI/CD secrets for automated deployments
+- Consider using `@nomicfoundation/hardhat-toolbox` encryption features
+
+For testnet development, a plain private key in `.env` (gitignored) is perfectly fine and standard practice.
+
+##### 2. **ETHERSCAN_API_KEY** (Free)
+
+Used to verify your deployed contracts on Etherscan:
+
+1. Go to https://etherscan.io/apis
+2. Click "Sign Up" (or "Login" if you have an account)
+3. After logging in, go to https://etherscan.io/myapikey
+4. Click "Add" to create a new API key
+5. Name it (e.g., "Laxo Development")
+6. Copy the API key and add it to your `.env` file
+
+**Note**: The free tier is sufficient for contract verification.
+
+##### 3. **SEPOLIA_RPC_URL** (Free)
+
+You need an RPC endpoint to connect to Sepolia testnet. Options:
+
+**Option A: Alchemy (Recommended)**
+1. Go to https://www.alchemy.com/
+2. Sign up for a free account
+3. Create a new app:
+   - Network: Ethereum
+   - Chain: Sepolia
+4. Copy the HTTPS URL (looks like `https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY`)
+5. Add to `.env` as `SEPOLIA_RPC_URL`
+
+**Option B: Infura**
+1. Go to https://infura.io/
+2. Sign up for a free account
+3. Create a new project
+4. Copy the Sepolia endpoint URL (looks like `https://sepolia.infura.io/v3/YOUR_PROJECT_ID`)
+5. Add to `.env` as `SEPOLIA_RPC_URL`
+
+**Option C: Public RPC (No API Key Required)**
+- You can use: `https://ethereum-sepolia-rpc.publicnode.com` (no signup needed, free public RPC)
+- Note: `rpc.sepolia.org` is discontinued, use PublicNode instead
 
 ### 2. Compile Contracts
 

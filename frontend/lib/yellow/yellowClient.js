@@ -24,31 +24,95 @@ export class YellowClient {
     this.onError = options.onError || null;
     this.onConnect = options.onConnect || null;
     
-    // Initialize blockchain client for logging
+    // Initialize blockchain client for logging (non-blocking)
     try {
       this.blockchainClient = getBlockchainClient();
-      this.blockchainClient.connect().catch(() => {
+      // Try to connect but don't block if it fails
+      this.blockchainClient.connect().catch((err) => {
         // Silently fail if blockchain connection isn't available
-        console.warn('Blockchain connection not available, continuing without it');
+        console.warn('Blockchain connection not available, continuing without it:', err.message);
       });
     } catch (error) {
       console.warn('Failed to initialize blockchain client:', error);
+      // Continue without blockchain client - it's optional for logging
+    }
+  }
+
+  /**
+   * Get cached test wallet from localStorage
+   */
+  getCachedTestWallet() {
+    try {
+      const cached = localStorage.getItem('laxo_test_wallet')
+      if (cached) {
+        const walletData = JSON.parse(cached)
+        return {
+          address: walletData.address,
+          balance: walletData.balance || { usdc: 0 }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load cached wallet:', error)
+    }
+    return null
+  }
+
+  /**
+   * Save test wallet to localStorage cache
+   */
+  saveTestWalletToCache() {
+    try {
+      const walletData = {
+        address: this.userAddress,
+        balance: this.testBalance,
+        timestamp: Date.now()
+      }
+      localStorage.setItem('laxo_test_wallet', JSON.stringify(walletData))
+    } catch (error) {
+      console.warn('Failed to save wallet to cache:', error)
+    }
+  }
+
+  /**
+   * Clear test wallet from cache
+   */
+  clearTestWalletCache() {
+    try {
+      localStorage.removeItem('laxo_test_wallet')
+      console.log('✅ Test wallet cache cleared')
+    } catch (error) {
+      console.warn('Failed to clear wallet cache:', error)
     }
   }
 
   /**
    * Create a test wallet for development/testing
+   * Uses cached wallet if available, otherwise creates new one
    */
   async setupTestWallet() {
-    // Generate a deterministic test address (for consistency in testnet)
-    // In a real implementation, you might use a library like ethers.js to generate proper addresses
-    const testAddress = `0x${Array.from({ length: 40 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('')}`;
+    // Try to load from cache first
+    const cached = this.getCachedTestWallet()
+    
+    if (cached) {
+      console.log('✅ Loaded cached test wallet:', cached.address)
+      this.userAddress = cached.address
+      this.testBalance = cached.balance || { usdc: 0 }
+    } else {
+      // Generate a new deterministic test address
+      // In a real implementation, you might use a library like ethers.js to generate proper addresses
+      const testAddress = `0x${Array.from({ length: 40 }, () => 
+        Math.floor(Math.random() * 16).toString(16)
+      ).join('')}`;
 
-    this.userAddress = testAddress;
-    this.isTestWallet = true;
-    this.testBalance = { usdc: 0 }; // Initialize with zero balance
+      this.userAddress = testAddress
+      this.testBalance = { usdc: 0 } // Initialize with zero balance
+      
+      // Save to cache
+      this.saveTestWalletToCache()
+      console.log('✅ New test wallet created:', this.userAddress)
+    }
+
+    this.isTestWallet = true
 
     // Create mock message signer function for test wallet
     this.messageSigner = async (message) => {
@@ -57,8 +121,6 @@ export class YellowClient {
         Math.floor(Math.random() * 16).toString(16)
       ).join('')}`;
     };
-
-    console.log('✅ Test wallet created:', this.userAddress);
 
     return {
       userAddress: this.userAddress,
@@ -354,6 +416,9 @@ export class YellowClient {
     const amountNum = BigInt(amount);
     const currentBalance = BigInt(this.testBalance[asset] || 0);
     this.testBalance[asset] = (currentBalance + amountNum).toString();
+
+    // Save updated balance to cache
+    this.saveTestWalletToCache();
 
     console.log(`💰 Added ${amount} ${asset} to test wallet. New balance:`, this.testBalance);
     

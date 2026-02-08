@@ -22,6 +22,10 @@ export default function HubLayout({ children }) {
       // For test wallets, use the test balance
       if (status.isTestWallet && status.balance) {
         wallet.setBalance(status.balance)
+        // Save updated balance to cache
+        if (client.saveTestWalletToCache) {
+          client.saveTestWalletToCache()
+        }
       } else {
         // In a real implementation, you'd fetch balance from Yellow Network
         wallet.setBalance({ usdc: 0 })
@@ -31,7 +35,7 @@ export default function HubLayout({ children }) {
     }
   }
 
-  // Initialize Yellow SDK (but don't auto-connect)
+  // Initialize Yellow SDK and auto-load cached wallet if available
   useEffect(() => {
     async function initYellow() {
       try {
@@ -62,6 +66,15 @@ export default function HubLayout({ children }) {
         })
 
         setYellowClient(client)
+
+        // Auto-load cached wallet if available
+        const cached = client.getCachedTestWallet()
+        if (cached) {
+          console.log('🔄 Auto-loading cached wallet...')
+          wallet.setUserAddress(cached.address)
+          wallet.setBalance(cached.balance)
+          // Note: We don't auto-connect to Yellow Network, user needs to click Connect
+        }
       } catch (err) {
         console.error('Error initializing Yellow:', err)
         const errorMessage = err?.message || err?.toString() || 'Failed to initialize Yellow SDK'
@@ -72,7 +85,7 @@ export default function HubLayout({ children }) {
     initYellow()
   }, [])
 
-  // Connect wallet and Yellow Network (creates test wallet)
+  // Connect wallet and Yellow Network (creates or loads cached test wallet)
   async function connectWallet() {
     if (!yellowClient) return
 
@@ -80,15 +93,25 @@ export default function HubLayout({ children }) {
       setLoading(true)
       setError(null)
 
-      // Setup test wallet
+      // Setup test wallet (loads from cache if available)
       const { userAddress } = await yellowClient.setupTestWallet()
       wallet.setUserAddress(userAddress)
+
+      // Restore balance from cached wallet
+      const cached = yellowClient.getCachedTestWallet()
+      if (cached && cached.balance) {
+        wallet.setBalance(cached.balance)
+        // Also update the client's internal balance
+        if (yellowClient.isTestWallet) {
+          yellowClient.testBalance = cached.balance
+        }
+      }
 
       // Connect to Yellow Network
       await yellowClient.connect()
       wallet.setIsConnected(true)
 
-      // Update balance
+      // Update balance (this will also save to cache)
       await updateBalance(yellowClient, true)
     } catch (err) {
       console.error('Connection error:', err)
@@ -124,8 +147,43 @@ export default function HubLayout({ children }) {
     }
   }
 
-  // Disconnect wallet and Yellow Network
+  // Disconnect wallet and Yellow Network (but keep wallet in cache)
   async function disconnectWallet() {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Save current balance to cache before disconnecting
+      if (yellowClient && yellowClient.isTestWallet) {
+        // Use current balance from wallet state if available, otherwise from client
+        const currentBalance = wallet.balance || yellowClient.testBalance || { usdc: 0 }
+        yellowClient.testBalance = currentBalance
+        yellowClient.saveTestWalletToCache()
+        console.log('💾 Saved wallet balance to cache:', currentBalance)
+      }
+
+      // Disconnect from Yellow Network
+      if (yellowClient) {
+        yellowClient.disconnect()
+      }
+
+      // Clear connection state only (wallet address and balance stay visible)
+      wallet.setIsConnected(false)
+      // Keep userAddress and balance in state so user can see their cached wallet
+      // They'll be automatically restored when reconnecting
+
+      console.log('✅ Wallet disconnected (cached wallet preserved)')
+    } catch (err) {
+      console.error('Disconnect error:', err)
+      const errorMessage = err?.message || err?.toString() || 'Failed to disconnect'
+      setError(errorMessage)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Forget wallet (clear cache and disconnect)
+  async function forgetWallet() {
     try {
       setLoading(true)
       setError(null)
@@ -133,6 +191,8 @@ export default function HubLayout({ children }) {
       // Disconnect from Yellow Network
       if (yellowClient) {
         yellowClient.disconnect()
+        // Clear wallet cache
+        yellowClient.clearTestWalletCache()
       }
 
       // Clear wallet state
@@ -140,10 +200,10 @@ export default function HubLayout({ children }) {
       wallet.setUserAddress(null)
       wallet.setBalance(null)
 
-      console.log('✅ Wallet disconnected')
+      console.log('✅ Wallet forgotten and cache cleared')
     } catch (err) {
-      console.error('Disconnect error:', err)
-      const errorMessage = err?.message || err?.toString() || 'Failed to disconnect'
+      console.error('Forget wallet error:', err)
+      const errorMessage = err?.message || err?.toString() || 'Failed to forget wallet'
       setError(errorMessage)
     } finally {
       setLoading(false)
@@ -181,6 +241,9 @@ export default function HubLayout({ children }) {
         }}
         onDisconnect={async () => {
           await disconnectWallet()
+        }}
+        onForgetWallet={async () => {
+          await forgetWallet()
         }}
       />
       

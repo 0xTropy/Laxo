@@ -79,7 +79,7 @@ export default function Nav() {
                   onClick={() => setNetworkDropdownOpen(!networkDropdownOpen)}
                   className="flex items-center gap-2 rounded-lg border border-laxo-border bg-laxo-card px-4 py-2 text-sm font-semibold text-white transition hover:border-laxo-accent"
                 >
-                  <span>{wallet.selectedNetwork === 'testnet' ? 'Testnet' : 'Mainnet'}</span>
+                  <span>{wallet.selectedNetwork === 'testnet' ? 'Eth Sepolia' : 'Mainnet'}</span>
                   <svg
                     className={`h-4 w-4 transition-transform ${networkDropdownOpen ? 'rotate-180' : ''}`}
                     fill="none"
@@ -103,7 +103,7 @@ export default function Nav() {
                         }}
                         className="w-full px-4 py-3 text-left text-sm font-semibold text-white hover:bg-laxo-bg transition flex items-center justify-between"
                       >
-                        <span>Testnet</span>
+                        <span>Eth Sepolia</span>
                         {wallet.selectedNetwork === 'testnet' && (
                           <svg className="h-4 w-4 text-laxo-accent" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
