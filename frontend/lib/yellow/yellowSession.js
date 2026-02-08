@@ -65,6 +65,29 @@ export class YellowSession {
       await this.initialize();
     }
 
+    // Check balance before taking position
+    const status = this.client.getStatus();
+    if (status.isTestWallet) {
+      const balance = this.client.getTestBalance();
+      const amountNum = BigInt(amount);
+      const currentBalance = BigInt(balance?.usdc || 0);
+      
+      if (currentBalance < amountNum) {
+        throw new Error(`Insufficient balance. Required: ${amount}, Available: ${currentBalance.toString()}`);
+      }
+      
+      // Deduct balance for test wallet
+      const newBalance = currentBalance - amountNum;
+      this.client.testBalance.usdc = newBalance.toString();
+      
+      // Emit balance update
+      this.client.emit('balance_update', {
+        asset: 'usdc',
+        balance: newBalance.toString(),
+        total: { ...this.client.testBalance }
+      });
+    }
+
     const positionData = {
       type: 'position',
       positionType, // 'long' or 'short'
@@ -86,6 +109,18 @@ export class YellowSession {
       });
 
       console.log(`✅ Position taken off-chain: ${positionType} ${amount}`);
+
+      // Log blockchain event
+      if (this.client.blockchainClient) {
+        this.client.blockchainClient.log('event', `Position taken: ${positionType}`, {
+          positionType,
+          amount,
+          market: this.marketAddress,
+          positionKey,
+          userAddress: this.client.userAddress,
+          sessionId: this.sessionId
+        });
+      }
 
       return {
         positionKey,

@@ -1,4 +1,5 @@
 import { createAppSessionMessage, parseRPCResponse } from '@erc7824/nitrolite';
+import { getBlockchainClient } from '../blockchain/blockchainClient';
 
 /**
  * Yellow SDK Client Wrapper
@@ -13,12 +14,56 @@ export class YellowClient {
     this.sessionId = null;
     this.isConnected = false;
     this.listeners = new Map();
+    this.isTestWallet = false;
+    this.testBalance = { usdc: 0 }; // Track test wallet balance
+    this.blockchainClient = null; // Blockchain client for logging
     
     // Use sandbox for testing, production for live
     this.endpoint = options.endpoint || 'wss://clearnet-sandbox.yellow.com/ws';
     this.onMessage = options.onMessage || null;
     this.onError = options.onError || null;
     this.onConnect = options.onConnect || null;
+    
+    // Initialize blockchain client for logging
+    try {
+      this.blockchainClient = getBlockchainClient();
+      this.blockchainClient.connect().catch(() => {
+        // Silently fail if blockchain connection isn't available
+        console.warn('Blockchain connection not available, continuing without it');
+      });
+    } catch (error) {
+      console.warn('Failed to initialize blockchain client:', error);
+    }
+  }
+
+  /**
+   * Create a test wallet for development/testing
+   */
+  async setupTestWallet() {
+    // Generate a deterministic test address (for consistency in testnet)
+    // In a real implementation, you might use a library like ethers.js to generate proper addresses
+    const testAddress = `0x${Array.from({ length: 40 }, () => 
+      Math.floor(Math.random() * 16).toString(16)
+    ).join('')}`;
+
+    this.userAddress = testAddress;
+    this.isTestWallet = true;
+    this.testBalance = { usdc: 0 }; // Initialize with zero balance
+
+    // Create mock message signer function for test wallet
+    this.messageSigner = async (message) => {
+      // Return a mock signature (64 hex characters)
+      return `0x${Array.from({ length: 128 }, () => 
+        Math.floor(Math.random() * 16).toString(16)
+      ).join('')}`;
+    };
+
+    console.log('✅ Test wallet created:', this.userAddress);
+
+    return {
+      userAddress: this.userAddress,
+      messageSigner: this.messageSigner
+    };
   }
 
   /**
@@ -62,6 +107,14 @@ export class YellowClient {
       return;
     }
 
+    // Log blockchain connection attempt
+    if (this.blockchainClient) {
+      this.blockchainClient.log('info', 'Connecting to Yellow Network', {
+        endpoint: this.endpoint,
+        userAddress: this.userAddress
+      });
+    }
+
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.endpoint);
@@ -69,6 +122,16 @@ export class YellowClient {
         this.ws.onopen = () => {
           this.isConnected = true;
           console.log('✅ Connected to Yellow Network');
+          
+          // Log blockchain event
+          if (this.blockchainClient) {
+            this.blockchainClient.log('info', 'Connected to Yellow Network', {
+              endpoint: this.endpoint,
+              userAddress: this.userAddress,
+              sessionId: this.sessionId
+            });
+          }
+          
           if (this.onConnect) this.onConnect();
           resolve();
         };
@@ -279,6 +342,53 @@ export class YellowClient {
   }
 
   /**
+   * Add test funds to test wallet (for development/testing only)
+   * @param {string} amount - Amount in smallest unit (e.g., '1000000' for 1 USDC with 6 decimals)
+   * @param {string} asset - Asset type (default: 'usdc')
+   */
+  addTestFunds(amount, asset = 'usdc') {
+    if (!this.isTestWallet) {
+      throw new Error('Can only add test funds to test wallets');
+    }
+
+    const amountNum = BigInt(amount);
+    const currentBalance = BigInt(this.testBalance[asset] || 0);
+    this.testBalance[asset] = (currentBalance + amountNum).toString();
+
+    console.log(`💰 Added ${amount} ${asset} to test wallet. New balance:`, this.testBalance);
+    
+    // Log blockchain event
+    if (this.blockchainClient) {
+      this.blockchainClient.log('transaction', `Test funds added: ${amount} ${asset}`, {
+        amount,
+        asset,
+        previousBalance: currentBalance.toString(),
+        newBalance: this.testBalance[asset],
+        userAddress: this.userAddress
+      });
+    }
+    
+    // Emit balance update event
+    this.emit('balance_update', {
+      asset,
+      balance: this.testBalance[asset],
+      total: this.testBalance
+    });
+
+    return this.testBalance;
+  }
+
+  /**
+   * Get test wallet balance
+   */
+  getTestBalance() {
+    if (!this.isTestWallet) {
+      return null;
+    }
+    return { ...this.testBalance };
+  }
+
+  /**
    * Get current connection status
    */
   getStatus() {
@@ -286,7 +396,9 @@ export class YellowClient {
       isConnected: this.isConnected,
       sessionId: this.sessionId,
       userAddress: this.userAddress,
-      endpoint: this.endpoint
+      endpoint: this.endpoint,
+      isTestWallet: this.isTestWallet,
+      balance: this.isTestWallet ? this.getTestBalance() : null
     };
   }
 }

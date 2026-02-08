@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { getYellowClient } from '../../../lib/yellow/yellowClient'
 import { createMarketSession } from '../../../lib/yellow/yellowSession'
+import ErrorModal from '../../../components/ErrorModal'
+import { useWallet } from '../../../contexts/WalletContext'
 
 const CURRENCIES = [
   { code: 'USDC', name: 'US Dollar', pair: 'USDC/EURC', flag: '🇺🇸', targetPrice: '1.0' },
@@ -19,87 +21,40 @@ const CURRENCIES = [
 ]
 
 export default function ForexPerps() {
+  const wallet = useWallet()
   const [yellowClient, setYellowClient] = useState(null)
-  const [isConnected, setIsConnected] = useState(false)
-  const [userAddress, setUserAddress] = useState(null)
-  const [balance, setBalance] = useState(null)
   const [sessions, setSessions] = useState(new Map())
   const [positions, setPositions] = useState(new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [networkDropdownOpen, setNetworkDropdownOpen] = useState(false)
-  const [selectedNetwork, setSelectedNetwork] = useState('testnet')
+  
+  // Use wallet context state
+  const { isConnected, userAddress, balance } = wallet
 
-  // Initialize Yellow SDK
+  // Get Yellow client instance (shared across hub via layout)
   useEffect(() => {
-    async function initYellow() {
-      try {
-        const client = getYellowClient({
-          endpoint: 'wss://clearnet-sandbox.yellow.com/ws',
-          onMessage: (message) => {
-            console.log('Yellow message:', message)
-            if (message.type === 'payment' || message.type === 'balance_update') {
-              updateBalance()
-            }
-          },
-          onError: (err) => {
-            console.error('Yellow error:', err)
-            setError(err.message)
-          },
-          onConnect: () => {
-            setIsConnected(true)
-          }
-        })
-
-        setYellowClient(client)
-      } catch (err) {
-        console.error('Error initializing Yellow:', err)
-        setError(err.message)
-      }
-    }
-
-    initYellow()
+    const client = getYellowClient()
+    setYellowClient(client)
   }, [])
 
-  // Connect wallet and Yellow Network
-  async function connectWallet() {
-    if (!yellowClient) return
-
-    try {
-      setLoading(true)
-      setError(null)
-
-      // Setup wallet
-      const { userAddress } = await yellowClient.setupWallet()
-      setUserAddress(userAddress)
-
-      // Connect to Yellow Network
-      await yellowClient.connect()
-      setIsConnected(true)
-
-      // Update balance
-      await updateBalance()
-    } catch (err) {
-      console.error('Connection error:', err)
-      setError(err.message || 'Failed to connect')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   // Update balance from Yellow Network
-  async function updateBalance() {
-    if (!yellowClient || !isConnected) return
+  const updateBalance = async (client, connected) => {
+    if (!client || !connected) return
 
     try {
-      const status = yellowClient.getStatus()
-      // In a real implementation, you'd fetch balance from Yellow Network
-      // For now, we'll use a placeholder
-      setBalance({ usdc: 0 })
+      const status = client.getStatus()
+      // For test wallets, use the test balance
+      if (status.isTestWallet && status.balance) {
+        wallet.setBalance(status.balance)
+      } else {
+        // In a real implementation, you'd fetch balance from Yellow Network
+        wallet.setBalance({ usdc: 0 })
+      }
     } catch (err) {
       console.error('Balance update error:', err)
     }
   }
+
 
   // Take a position in a market
   async function takePosition(currency, positionType) {
@@ -127,6 +82,9 @@ export default function ForexPerps() {
       const amount = '1000000' // 1 USDC (6 decimals)
       const position = await session.takePosition(positionType, amount)
 
+      // Update balance after taking position (balance was deducted in session.takePosition)
+      await updateBalance(yellowClient, isConnected)
+
       // Track position
       const positionKey = `${currency.pair}-${positionType}-${Date.now()}`
       setPositions(new Map(positions.set(positionKey, {
@@ -142,141 +100,33 @@ export default function ForexPerps() {
       console.log('✅ Position taken off-chain:', position)
     } catch (err) {
       console.error('Position error:', err)
-      setError(err.message || 'Failed to take position')
+      const errorMessage = err?.message || err?.toString() || 'Failed to take position'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  // Deposit funds into state channel
-  async function depositFunds() {
-    if (!yellowClient || !isConnected) {
-      setError('Please connect your wallet first')
-      return
-    }
-
-    try {
-      setLoading(true)
-      // In production, this would open a deposit modal
-      // For now, we'll simulate
-      const session = createMarketSession('0x0000000000000000000000000000000000000000', {
-        client: yellowClient
-      })
-      await session.initialize()
-      await session.deposit('1000000', 'usdc') // 1 USDC
-      await updateBalance()
-    } catch (err) {
-      console.error('Deposit error:', err)
-      setError(err.message || 'Failed to deposit')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   return (
     <div className="min-h-screen bg-laxo-bg">
+      {/* Error Modal - only for page-specific errors */}
+      {error && (
+        <ErrorModal 
+          error={error} 
+          onClose={() => setError(null)} 
+        />
+      )}
+      
       <div className="mx-auto max-w-6xl px-6 py-20">
         {/* Header */}
-        <div className="text-center mb-12 relative">
-          <div className="absolute top-0 right-0">
-            {/* Network Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setNetworkDropdownOpen(!networkDropdownOpen)}
-                className="flex items-center gap-2 rounded-lg border border-laxo-border bg-laxo-card px-4 py-2 text-sm font-semibold text-white transition hover:border-laxo-accent"
-              >
-                <span>{selectedNetwork === 'testnet' ? 'Testnet' : 'Mainnet'}</span>
-                <svg
-                  className={`h-4 w-4 transition-transform ${networkDropdownOpen ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {networkDropdownOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => setNetworkDropdownOpen(false)}
-                  />
-                  <div className="absolute right-0 mt-2 z-20 w-64 rounded-lg border border-laxo-border bg-laxo-card shadow-lg">
-                    <button
-                      onClick={() => {
-                        setSelectedNetwork('testnet')
-                        setNetworkDropdownOpen(false)
-                      }}
-                      className="w-full px-4 py-3 text-left text-sm font-semibold text-white hover:bg-laxo-bg transition flex items-center justify-between"
-                    >
-                      <span>Testnet</span>
-                      {selectedNetwork === 'testnet' && (
-                        <svg className="h-4 w-4 text-laxo-accent" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                    </button>
-                    <button
-                      disabled
-                      className="w-full px-4 py-3 text-left text-sm text-gray-500 cursor-not-allowed opacity-50 flex items-center justify-between"
-                    >
-                      <span className="text-left">Mainnet (for like real wallets and use)</span>
-                      <svg className="h-4 w-4 shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+        <div className="text-center mb-12">
           <h1 className="font-display text-4xl font-bold tracking-tight text-white md:text-5xl mb-4">
             Forex Perps
           </h1>
           <p className="text-lg text-gray-400 mb-6">
             Prediction markets powered by Yellow Network
           </p>
-
-          {/* Connection Status */}
-          <div className="flex items-center justify-center gap-4 mb-6">
-            {!isConnected ? (
-              <button
-                onClick={connectWallet}
-                disabled={loading}
-                className="rounded-full bg-laxo-accent px-6 py-3 text-base font-semibold text-laxo-bg transition hover:bg-cyan-400 disabled:opacity-50"
-              >
-                {loading ? 'Connecting...' : 'Connect Wallet & Yellow Network'}
-              </button>
-            ) : (
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-gray-400">
-                    Connected to Yellow Network
-                  </span>
-                </div>
-                {userAddress && (
-                  <span className="text-sm text-gray-500 font-mono">
-                    {userAddress.slice(0, 6)}...{userAddress.slice(-4)}
-                  </span>
-                )}
-                <button
-                  onClick={depositFunds}
-                  disabled={loading}
-                  className="rounded-full border border-laxo-border bg-transparent px-4 py-2 text-sm font-semibold text-white transition hover:border-laxo-accent"
-                >
-                  Deposit
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Error Display */}
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/50 rounded-lg px-4 py-2 text-sm text-red-400 mb-4">
-              {error}
-            </div>
-          )}
 
           {/* Info Banner */}
           <div className="bg-cyan-500/10 border border-cyan-500/50 rounded-lg px-4 py-3 text-sm text-cyan-300">

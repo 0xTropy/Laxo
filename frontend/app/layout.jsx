@@ -2,6 +2,7 @@ import { DM_Sans, Outfit } from 'next/font/google'
 import './globals.css'
 import Nav from './Nav'
 import Footer from './Footer'
+import { WalletProvider } from '../contexts/WalletContext'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -24,9 +25,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" className={`${dmSans.variable} ${outfit.variable}`}>
       <body>
-        <Nav />
-        <main>{children}</main>
-        <Footer />
+        <WalletProvider>
+          <Nav />
+          <main>{children}</main>
+          <Footer />
+        </WalletProvider>
       </body>
     </html>
   )
