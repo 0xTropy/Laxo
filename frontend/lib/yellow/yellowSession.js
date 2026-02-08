@@ -73,7 +73,11 @@ export class YellowSession {
       const currentBalance = BigInt(balance?.usdc || 0);
       
       if (currentBalance < amountNum) {
-        throw new Error(`Insufficient balance. Required: ${amount}, Available: ${currentBalance.toString()}`);
+        // Format amounts for human-readable error messages
+        // USDC has 6 decimals, so divide by 1,000,000 to get USDC amount
+        const requiredUSDC = (Number(amountNum) / 1000000).toFixed(2);
+        const availableUSDC = (Number(currentBalance) / 1000000).toFixed(2);
+        throw new Error(`Insufficient balance. Required: ${requiredUSDC} USDC, Available: ${availableUSDC} USDC`);
       }
       
       // Deduct balance for test wallet

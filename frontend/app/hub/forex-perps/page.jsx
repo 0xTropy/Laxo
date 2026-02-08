@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo } from 'react'
 import Link from 'next/link'
 import { getYellowClient } from '../../../lib/yellow/yellowClient'
 import { createMarketSession } from '../../../lib/yellow/yellowSession'
@@ -9,6 +9,7 @@ import { useWallet } from '../../../contexts/WalletContext'
 import PriceChart from '../../../components/PriceChart'
 import CreateMarketModal from '../../../components/CreateMarketModal'
 import { subscribeToPrice, getCurrentPrice } from '../../../lib/oracle/priceFeed'
+import { savePositions, loadPositions, savePosition, removePosition } from '../../../lib/wallet/persistence'
 
 // Currency definitions - showing price of currency vs USD
 const CURRENCIES = [
@@ -23,6 +24,92 @@ const CURRENCIES = [
   { code: 'ZAR', name: 'South African Rand', symbol: 'ZAR', flag: '🇿🇦' },
 ]
 
+// Memoized Currency Card component to prevent unnecessary re-renders
+const CurrencyCard = memo(({ currency, currentPrice, quoteCurrency, marketCount, isConnected, loading, onSelectCurrency, onCreateMarket }) => {
+  return (
+    <div className="rounded-2xl border border-laxo-border bg-laxo-card p-6 transition hover:border-laxo-accent/50">
+      {/* Currency Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">{currency.flag}</span>
+          <div>
+            <h3 className="font-display text-lg font-semibold text-white">
+              {currency.name}
+            </h3>
+            <p className="text-xs text-gray-500">{currency.symbol}</p>
+          </div>
+        </div>
+        {marketCount > 0 && (
+          <button
+            onClick={onSelectCurrency}
+            className="text-xs px-2 py-1 rounded bg-laxo-accent/20 text-laxo-accent font-semibold hover:bg-laxo-accent/30 transition"
+          >
+            {marketCount} {marketCount === 1 ? 'market' : 'markets'}
+          </button>
+        )}
+      </div>
+
+      {/* Live Price Display */}
+      <div className="mb-4">
+        {currency.code === quoteCurrency ? (
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Base Currency</div>
+            <div className="text-3xl font-bold text-white mb-2">1.0000</div>
+            <div className="text-xs text-gray-400">
+              {currency.symbol} = {currency.symbol}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="text-xs text-gray-500 mb-1">Price ({quoteCurrency})</div>
+            <div className="text-3xl font-bold text-white mb-2">
+              {currentPrice ? currentPrice.toFixed(4) : '--'}
+            </div>
+            {currentPrice && (
+              <div className="text-xs text-gray-400">
+                1 {currency.symbol} = {currentPrice.toFixed(4)} {quoteCurrency}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Price Chart */}
+      <div className="mb-4">
+        {currency.code !== quoteCurrency ? (
+          <PriceChart pair={`${currency.code}/${quoteCurrency}`} height={150} />
+        ) : (
+          <div className="h-[150px] flex items-center justify-center text-gray-500 text-sm">
+            Cannot display chart for {currency.code}/{quoteCurrency}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="space-y-2">
+        <button
+          onClick={onCreateMarket}
+          disabled={loading || !isConnected}
+          className="w-full rounded-lg bg-laxo-accent/20 border border-laxo-accent/50 px-4 py-2 text-sm font-semibold text-laxo-accent transition hover:bg-laxo-accent/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={!isConnected ? 'Connect wallet to create markets' : ''}
+        >
+          ➕ Create Market
+        </button>
+        
+        {marketCount > 0 && (
+          <button
+            onClick={onSelectCurrency}
+            className="w-full rounded-lg border border-laxo-border bg-laxo-bg px-4 py-2 text-sm font-semibold text-white transition hover:border-laxo-accent hover:bg-laxo-card disabled:opacity-50"
+          >
+            View All Markets ({marketCount})
+          </button>
+        )}
+      </div>
+    </div>
+  )
+})
+CurrencyCard.displayName = 'CurrencyCard'
+
 export default function ForexPerps() {
   const wallet = useWallet()
   const [yellowClient, setYellowClient] = useState(null)
@@ -36,6 +123,7 @@ export default function ForexPerps() {
   const [selectedCurrency, setSelectedCurrency] = useState(null) // For viewing all markets of a currency
   const [quoteCurrency, setQuoteCurrency] = useState('USD') // Quote currency for price display (default: USD)
   const [isRehydrating, setIsRehydrating] = useState(false) // Track rehydration state
+  const [resolvedMarkets, setResolvedMarkets] = useState(new Set()) // Track which markets have been resolved
   
   // Use wallet context state
   const { isConnected, userAddress, balance } = wallet
@@ -44,6 +132,12 @@ export default function ForexPerps() {
   useEffect(() => {
     const client = getYellowClient()
     setYellowClient(client)
+    
+    // Load persisted positions on mount
+    const persistedPositions = loadPositions()
+    if (persistedPositions.size > 0) {
+      setPositions(persistedPositions)
+    }
   }, [])
 
   // Clear prices and rehydrate when quote currency changes
@@ -52,8 +146,27 @@ export default function ForexPerps() {
     // Clear all current prices to force rehydration
     setCurrentPrices(new Map())
     
-    // Clear price cache for old pairs (optional - helps ensure fresh data)
-    // Note: This is handled by the priceFeed service's cache expiration
+    let loadedCount = 0
+    const expectedCount = CURRENCIES.filter(c => c.code !== quoteCurrency).length
+    
+    // Batch price updates to reduce re-renders
+    const pendingUpdates = new Map()
+    let updateTimeout = null
+    
+    const batchUpdatePrices = () => {
+      if (pendingUpdates.size > 0) {
+        setCurrentPrices(prev => {
+          const newMap = new Map(prev)
+          pendingUpdates.forEach((price, code) => {
+            newMap.set(code, price)
+          })
+          pendingUpdates.clear()
+          return newMap
+        })
+        setIsRehydrating(false)
+      }
+      updateTimeout = null
+    }
     
     // Rehydrate all currency prices with new quote currency
     const unsubscribes = CURRENCIES.map(currency => {
@@ -68,31 +181,47 @@ export default function ForexPerps() {
       // Force immediate fetch for this pair to rehydrate
       getCurrentPrice(oraclePair)
         .then(({ price, timestamp }) => {
-          setCurrentPrices(prev => {
-            const newMap = new Map(prev.set(currency.code, price))
-            // Check if all currencies have been loaded
-            const loadedCount = Array.from(newMap.keys()).length
-            const expectedCount = CURRENCIES.filter(c => c.code !== quoteCurrency).length
-            if (loadedCount >= expectedCount) {
-              setIsRehydrating(false)
-            }
-            return newMap
-          })
+          pendingUpdates.set(currency.code, price)
+          loadedCount++
+          // Check if all currencies have been loaded
+          if (loadedCount >= expectedCount) {
+            // Batch update all prices at once
+            batchUpdatePrices()
+          }
         })
         .catch(err => {
           console.error(`Error fetching price for ${oraclePair}:`, err)
-          setIsRehydrating(false)
+          loadedCount++
+          if (loadedCount >= expectedCount) {
+            batchUpdatePrices()
+          }
         })
       
-      // Subscribe to ongoing updates
+      // Subscribe to ongoing updates (throttled and batched)
+      let lastUpdate = 0
+      const UPDATE_THROTTLE = 1000 // Update UI at most once per second
+      
       return subscribeToPrice(oraclePair, (price, timestamp) => {
-        setCurrentPrices(prev => new Map(prev.set(currency.code, price)))
+        const now = Date.now()
+        if (now - lastUpdate < UPDATE_THROTTLE) {
+          return // Skip if too soon
+        }
+        lastUpdate = now
+        
+        // Batch updates instead of immediate state update
+        pendingUpdates.set(currency.code, price)
+        if (!updateTimeout) {
+          updateTimeout = setTimeout(batchUpdatePrices, 100) // Batch updates every 100ms
+        }
         setIsRehydrating(false) // Mark as done when first update arrives
       })
     })
 
     return () => {
       unsubscribes.forEach(unsub => unsub())
+      if (updateTimeout) {
+        clearTimeout(updateTimeout)
+      }
     }
   }, [quoteCurrency])
 
@@ -114,9 +243,138 @@ export default function ForexPerps() {
     }
   }
 
+  // Check and resolve markets that have reached their resolution time
+  useEffect(() => {
+    const checkMarketResolutions = async () => {
+      const now = Math.floor(Date.now() / 1000)
+      
+      // Check all markets
+      Array.from(markets.values()).forEach(market => {
+        // Skip if already resolved
+        if (resolvedMarkets.has(market.id)) return
+        
+        // Check if resolution time has passed
+        if (market.resolutionTime <= now) {
+          // Mark as resolved (create new Set to avoid mutation)
+          setResolvedMarkets(prev => new Set([...prev, market.id]))
+          
+          // Get current price to determine winner
+          const currentPrice = currentPrices.get(market.currencyCode)
+          if (currentPrice === undefined) return // Wait for price data
+          
+          // Resolve positions for this market
+          setPositions(prev => {
+            const newPositions = new Map(prev)
+            const marketPositions = Array.from(prev.entries()).filter(([_, pos]) => 
+              pos.marketId === market.id && pos.status === 'active'
+            )
+            
+            // Calculate total pool (all positions in this market)
+            const totalPool = marketPositions.reduce((sum, [_, pos]) => sum + Number(pos.amount), 0)
+            
+            // Separate winners and losers
+            const winners = marketPositions.filter(([_, pos]) => {
+              const isLong = pos.positionType === 'long'
+              return isLong 
+                ? (currentPrice >= market.targetPrice)
+                : (currentPrice < market.targetPrice)
+            })
+            const losers = marketPositions.filter(([_, pos]) => {
+              const isLong = pos.positionType === 'long'
+              return isLong 
+                ? (currentPrice < market.targetPrice)
+                : (currentPrice >= market.targetPrice)
+            })
+            
+            // Include artificial liquidity in the pool
+            const artificialLiquidity = market.artificialLiquidity || { long: 0, short: 0, total: 0 }
+            const totalPoolWithLiquidity = totalPool + artificialLiquidity.total
+            
+            // Calculate payouts: winners split the total pool (including artificial liquidity) proportionally
+            marketPositions.forEach(([key, position]) => {
+              const isLong = position.positionType === 'long'
+              const isWinner = isLong 
+                ? (currentPrice >= market.targetPrice)
+                : (currentPrice < market.targetPrice)
+              
+              if (isWinner && winners.length > 0) {
+                // Winner gets their bet back + proportional share of losers' bets + artificial liquidity
+                const totalWinnerAmount = winners.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
+                const totalLoserAmount = losers.reduce((sum, [_, p]) => sum + Number(p.amount), 0)
+                const winnerShare = Number(position.amount) / totalWinnerAmount
+                
+                // Payout = bet back + share of losers + share of artificial liquidity
+                const payout = Number(position.amount) + 
+                  (totalLoserAmount * winnerShare) + 
+                  (artificialLiquidity.total * winnerShare)
+                
+                newPositions.set(key, {
+                  ...position,
+                  status: 'resolved',
+                  payout: Math.floor(payout),
+                  finalPrice: currentPrice,
+                  resolvedAt: now
+                })
+              } else {
+                // Loser - mark as resolved with no payout
+                newPositions.set(key, {
+                  ...position,
+                  status: 'resolved',
+                  payout: 0,
+                  finalPrice: currentPrice,
+                  resolvedAt: now
+                })
+              }
+            })
+            
+            // Calculate total payout for this user's positions in this market
+            const userPayout = Array.from(newPositions.values())
+              .filter(p => p.marketId === market.id && p.status === 'resolved' && p.payout > 0)
+              .reduce((sum, p) => sum + p.payout, 0)
+            
+            // Persist updated positions
+            savePositions(newPositions)
+            
+            // Add payout to balance if user won
+            if (userPayout > 0 && yellowClient) {
+              const status = yellowClient.getStatus()
+              if (status.isTestWallet) {
+                const currentBalance = BigInt(yellowClient.testBalance.usdc || 0)
+                const payoutBigInt = BigInt(userPayout)
+                yellowClient.testBalance.usdc = (currentBalance + payoutBigInt).toString()
+                
+                // Update wallet balance display
+                updateBalance(yellowClient, isConnected)
+                
+                // Emit balance update
+                yellowClient.emit('balance_update', {
+                  asset: 'usdc',
+                  balance: yellowClient.testBalance.usdc,
+                  total: { ...yellowClient.testBalance }
+                })
+                
+                console.log(`💰 Payout: +${(userPayout / 1000000).toFixed(2)} USDC`)
+              }
+            }
+            
+            return newPositions
+          })
+          
+          console.log(`✅ Market ${market.id} resolved at price ${currentPrice}`)
+        }
+      })
+    }
+    
+    // Check every 5 seconds for markets that need resolution
+    const interval = setInterval(checkMarketResolutions, 5000)
+    checkMarketResolutions() // Check immediately
+    
+    return () => clearInterval(interval)
+  }, [markets, resolvedMarkets, currentPrices, yellowClient, isConnected])
 
-  // Take a position in a market
-  async function takePosition(currency, positionType, amount = '1000000', market = null) {
+
+  // Take a position in a market (memoized to prevent recreation)
+  const takePosition = useCallback(async (currency, positionType, amount = '1000000', market = null) => {
     if (!yellowClient || !isConnected) {
       setError('Please connect your wallet first')
       return
@@ -137,12 +395,12 @@ export default function ForexPerps() {
         : `0x${Math.random().toString(16).substr(2, 40)}`
 
       // Create or get session for this market
-      const sessionKey = market?.id || currency.pair
+      const sessionKey = market?.id || currency.code
       let session = sessions.get(sessionKey)
       if (!session) {
         session = createMarketSession(marketAddress, { client: yellowClient })
         await session.initialize()
-        setSessions(new Map(sessions.set(sessionKey, session)))
+        setSessions(prev => new Map(prev.set(sessionKey, session)))
       }
 
       // Convert amount to smallest unit (6 decimals for USDC)
@@ -159,7 +417,7 @@ export default function ForexPerps() {
 
       // Track position with market info
       const positionKey = `${market?.id || currency.code}-${positionType}-${Date.now()}`
-      setPositions(new Map(positions.set(positionKey, {
+      const positionData = {
         ...position,
         currency: currency.code,
         currencyPair: `${currency.code}/USD`,
@@ -171,8 +429,16 @@ export default function ForexPerps() {
         targetPrice: market?.targetPrice,
         currentPrice: currentPrice,
         resolutionTime: market?.resolutionTime,
-        createdAt: Date.now()
-      })))
+        createdAt: Date.now(),
+        marketAddress: marketAddress
+      }
+      
+      setPositions(prev => {
+        const newPositions = new Map(prev.set(positionKey, positionData))
+        // Persist to localStorage
+        savePositions(newPositions)
+        return newPositions
+      })
 
       console.log('✅ Position taken:', {
         currency: currency.code,
@@ -190,31 +456,180 @@ export default function ForexPerps() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [yellowClient, isConnected, quoteCurrency])
 
-  // Create a new market
-  async function handleCreateMarket({ currency, targetPrice, resolutionTime, targetPriceFormatted }) {
-    // In production, this would deploy a contract via MarketFactory
-    // For now, we'll create a market object and track it
-    const marketId = `${currency.code}-${Date.now()}`
-    const market = {
-      id: marketId,
-      currencyCode: currency.code,
-      currencyPair: `${currency.code}/USD`, // For display
-      targetPrice,
-      targetPriceFormatted,
-      resolutionTime,
-      createdAt: Date.now(),
-      currency
+  // Calculate probability using normal distribution approximation
+  const calculateProbability = (currentPrice, targetPrice, timeToResolution) => {
+    // Use a simple normal distribution model
+    // Probability that price >= targetPrice (Long wins)
+    
+    // Calculate distance from current to target
+    const priceDiff = Math.abs(currentPrice - targetPrice)
+    const priceDiffPercent = currentPrice > 0 ? (priceDiff / currentPrice) * 100 : 0
+    
+    // Estimate volatility based on time to resolution
+    // More time = more uncertainty (higher volatility)
+    // Typical forex daily volatility is ~0.5-1%, so we scale by time
+    const daysToResolution = timeToResolution / (24 * 60 * 60)
+    const estimatedVolatility = Math.min(0.02, 0.005 * Math.sqrt(daysToResolution)) // Cap at 2%
+    
+    // Calculate z-score (how many standard deviations away)
+    const zScore = (targetPrice - currentPrice) / (currentPrice * estimatedVolatility)
+    
+    // Use cumulative distribution function approximation
+    // P(X >= target) = 1 - Φ(z)
+    // Simple approximation: Φ(z) ≈ 0.5 * (1 + erf(z/√2))
+    const erfApprox = (x) => {
+      // Abramowitz and Stegun approximation
+      const a1 =  0.254829592
+      const a2 = -0.284496736
+      const a3 =  1.421413741
+      const a4 = -1.453152027
+      const a5 =  1.061405429
+      const p  =  0.3275911
+      
+      const sign = x < 0 ? -1 : 1
+      x = Math.abs(x)
+      
+      const t = 1.0 / (1.0 + p * x)
+      const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x)
+      
+      return sign * y
     }
     
-    setMarkets(prev => new Map(prev.set(marketId, market)))
-    console.log('✅ Market created:', market)
+    const probabilityLong = 0.5 * (1 - erfApprox(zScore / Math.sqrt(2)))
     
-    // You can now bet on this market
-    return market
+    // Clamp between 0.1 and 0.9 (never 0% or 100% to ensure liquidity on both sides)
+    return Math.max(0.1, Math.min(0.9, probabilityLong))
   }
 
+  // Create a new market (memoized)
+  const handleCreateMarket = useCallback(async ({ currency, targetPrice, resolutionTime, targetPriceFormatted }) => {
+    // Get current price to calculate probability
+    const currentPrice = currentPrices.get(currency.code)
+    if (!currentPrice) {
+      // Try to fetch it
+      try {
+        const { getCurrentPrice } = await import('../../../lib/oracle/priceFeed')
+        const oraclePair = `${currency.code}/${quoteCurrency}`
+        const { price } = await getCurrentPrice(oraclePair)
+        const probLong = calculateProbability(price, targetPrice, resolutionTime - Math.floor(Date.now() / 1000))
+        
+        // Create artificial liquidity based on probability
+        const totalLiquidity = 10000 // 10 USDC in smallest units (10000 * 1000000 / 1000000 = 10)
+        const longLiquidity = Math.floor(totalLiquidity * probLong)
+        const shortLiquidity = totalLiquidity - longLiquidity
+        
+        const marketId = `${currency.code}-${Date.now()}`
+        const market = {
+          id: marketId,
+          currencyCode: currency.code,
+          currencyPair: `${currency.code}/USD`,
+          targetPrice,
+          targetPriceFormatted,
+          resolutionTime,
+          createdAt: Date.now(),
+          currency,
+          artificialLiquidity: {
+            long: longLiquidity,
+            short: shortLiquidity,
+            total: totalLiquidity,
+            probabilityLong: probLong,
+            probabilityShort: 1 - probLong
+          }
+        }
+        
+        setMarkets(prev => new Map(prev.set(marketId, market)))
+        console.log('✅ Market created with artificial liquidity:', {
+          market,
+          probLong: (probLong * 100).toFixed(1) + '%',
+          longLiquidity: (longLiquidity / 1000000).toFixed(2) + ' USDC',
+          shortLiquidity: (shortLiquidity / 1000000).toFixed(2) + ' USDC'
+        })
+        
+        return market
+      } catch (error) {
+        console.error('Error fetching price for market creation:', error)
+        // Create market without liquidity if price fetch fails
+        const marketId = `${currency.code}-${Date.now()}`
+        const market = {
+          id: marketId,
+          currencyCode: currency.code,
+          currencyPair: `${currency.code}/USD`,
+          targetPrice,
+          targetPriceFormatted,
+          resolutionTime,
+          createdAt: Date.now(),
+          currency,
+          artificialLiquidity: {
+            long: 5000, // Default 50/50 split
+            short: 5000,
+            total: 10000,
+            probabilityLong: 0.5,
+            probabilityShort: 0.5
+          }
+        }
+        setMarkets(prev => new Map(prev.set(marketId, market)))
+        return market
+      }
+    } else {
+      // Calculate probability and create liquidity
+      const timeToResolution = resolutionTime - Math.floor(Date.now() / 1000)
+      const probLong = calculateProbability(currentPrice, targetPrice, timeToResolution)
+      
+      const totalLiquidity = 10000 // 10 USDC
+      const longLiquidity = Math.floor(totalLiquidity * probLong)
+      const shortLiquidity = totalLiquidity - longLiquidity
+      
+      const marketId = `${currency.code}-${Date.now()}`
+      const market = {
+        id: marketId,
+        currencyCode: currency.code,
+        currencyPair: `${currency.code}/USD`,
+        targetPrice,
+        targetPriceFormatted,
+        resolutionTime,
+        createdAt: Date.now(),
+        currency,
+        artificialLiquidity: {
+          long: longLiquidity,
+          short: shortLiquidity,
+          total: totalLiquidity,
+          probabilityLong: probLong,
+          probabilityShort: 1 - probLong
+        }
+      }
+      
+      setMarkets(prev => new Map(prev.set(marketId, market)))
+      console.log('✅ Market created with artificial liquidity:', {
+        market,
+        probLong: (probLong * 100).toFixed(1) + '%',
+        longLiquidity: (longLiquidity / 1000000).toFixed(2) + ' USDC',
+        shortLiquidity: (shortLiquidity / 1000000).toFixed(2) + ' USDC'
+      })
+      
+      return market
+    }
+  }, [currentPrices, quoteCurrency])
+
+  // Pre-compute currency data for all currencies (moved outside map to fix React hooks violation)
+  const currencyDataMap = useMemo(() => {
+    const dataMap = new Map()
+    CURRENCIES.forEach(currency => {
+      const currencyMarkets = Array.from(markets.values()).filter(
+        m => m.currency.code === currency.code
+      )
+      const currencyPositions = Array.from(positions.values()).filter(
+        p => p.currency === currency.code
+      )
+      dataMap.set(currency.code, {
+        markets: currencyMarkets,
+        positions: currencyPositions,
+        marketCount: currencyMarkets.length
+      })
+    })
+    return dataMap
+  }, [markets, positions])
 
   return (
     <div className="min-h-screen bg-laxo-bg">
@@ -289,97 +704,27 @@ export default function ForexPerps() {
         {/* Currency Cards - Show price of each currency */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
           {CURRENCIES.map((currency) => {
-            const currencyMarkets = Array.from(markets.values()).filter(
-              m => m.currency.code === currency.code
-            )
-            const currencyPositions = Array.from(positions.values()).filter(
-              p => p.currency === currency.code
-            )
+            const currencyData = currencyDataMap.get(currency.code) || { marketCount: 0 }
             const currentPrice = currentPrices.get(currency.code)
-            const marketCount = currencyMarkets.length
 
             return (
-              <div
+              <CurrencyCard
                 key={currency.code}
-                className="rounded-2xl border border-laxo-border bg-laxo-card p-6 transition hover:border-laxo-accent/50"
-              >
-                {/* Currency Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-3xl">{currency.flag}</span>
-                    <div>
-                      <h3 className="font-display text-lg font-semibold text-white">
-                        {currency.name}
-                      </h3>
-                      <p className="text-xs text-gray-500">{currency.symbol}</p>
-                    </div>
-                  </div>
-                  {marketCount > 0 && (
-                    <button
-                      onClick={() => setSelectedCurrency(currency.code)}
-                      className="text-xs px-2 py-1 rounded bg-laxo-accent/20 text-laxo-accent font-semibold hover:bg-laxo-accent/30 transition"
-                    >
-                      {marketCount} {marketCount === 1 ? 'market' : 'markets'}
-                    </button>
-                  )}
-                </div>
-
-                {/* Live Price Display */}
-                <div className="mb-4">
-                  {currency.code === quoteCurrency ? (
-                    <div>
-                      <div className="text-xs text-gray-500 mb-1">Base Currency</div>
-                      <div className="text-3xl font-bold text-white mb-2">1.0000</div>
-                      <div className="text-xs text-gray-400">
-                        {currency.symbol} = {currency.symbol}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-xs text-gray-500 mb-1">Price ({quoteCurrency})</div>
-                      <div className="text-3xl font-bold text-white mb-2">
-                        {currentPrice ? currentPrice.toFixed(4) : '--'}
-                      </div>
-                      {currentPrice && (
-                        <div className="text-xs text-gray-400">
-                          1 {currency.symbol} = {currentPrice.toFixed(4)} {quoteCurrency}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                {/* Price Chart */}
-                <div className="mb-4">
-                  {currency.code !== quoteCurrency ? (
-                    <PriceChart pair={`${currency.code}/${quoteCurrency}`} height={150} />
-                  ) : (
-                    <div className="h-[150px] flex items-center justify-center text-gray-500 text-sm">
-                      Cannot display chart for {currency.code}/{quoteCurrency}
-                    </div>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setCreateMarketModal({ open: true, currency })}
-                    disabled={loading}
-                    className="w-full rounded-lg bg-laxo-accent/20 border border-laxo-accent/50 px-4 py-2 text-sm font-semibold text-laxo-accent transition hover:bg-laxo-accent/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    ➕ Create Market
-                  </button>
-                  
-                  {marketCount > 0 && (
-                    <button
-                      onClick={() => setSelectedCurrency(currency.code)}
-                      className="w-full rounded-lg border border-laxo-border bg-laxo-bg px-4 py-2 text-sm font-semibold text-white transition hover:border-laxo-accent hover:bg-laxo-card disabled:opacity-50"
-                    >
-                      View All Markets ({marketCount})
-                    </button>
-                  )}
-                </div>
-              </div>
+                currency={currency}
+                currentPrice={currentPrice}
+                quoteCurrency={quoteCurrency}
+                marketCount={currencyData.marketCount}
+                isConnected={isConnected}
+                loading={loading}
+                onSelectCurrency={() => setSelectedCurrency(currency.code)}
+                onCreateMarket={() => {
+                  if (!isConnected) {
+                    setError('Please connect your wallet first')
+                    return
+                  }
+                  setCreateMarketModal({ open: true, currency })
+                }}
+              />
             )
           })}
         </div>
@@ -406,15 +751,19 @@ export default function ForexPerps() {
               .length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <p>No markets created yet for {CURRENCIES.find(c => c.code === selectedCurrency)?.name}</p>
-                <button
-                  onClick={() => {
-                    const currency = CURRENCIES.find(c => c.code === selectedCurrency)
-                    setCreateMarketModal({ open: true, currency })
-                  }}
-                  className="mt-4 rounded-lg bg-laxo-accent px-4 py-2 text-sm font-semibold text-laxo-bg transition hover:bg-cyan-400"
-                >
-                  Create First Market
-                </button>
+                {!isConnected ? (
+                  <p className="mt-4 text-sm text-gray-500">Connect your wallet to create markets</p>
+                ) : (
+                  <button
+                    onClick={() => {
+                      const currency = CURRENCIES.find(c => c.code === selectedCurrency)
+                      setCreateMarketModal({ open: true, currency })
+                    }}
+                    className="mt-4 rounded-lg bg-laxo-accent px-4 py-2 text-sm font-semibold text-laxo-bg transition hover:bg-cyan-400"
+                  >
+                    Create First Market
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -445,22 +794,46 @@ export default function ForexPerps() {
                             <div className="text-xs text-gray-400 space-y-1">
                               <div>Current: {currentPriceForMarket ? `${currentPriceForMarket.toFixed(4)} ${quoteCurrency}` : '--'}</div>
                               <div>Resolves: {new Date(market.resolutionTime * 1000).toLocaleString()}</div>
+                              {market.artificialLiquidity && (
+                                <div className="mt-2 pt-2 border-t border-laxo-border/30">
+                                  <div className="text-xs text-gray-500">
+                                    Liquidity: Long {((market.artificialLiquidity.long / market.artificialLiquidity.total) * 100).toFixed(0)}% / Short {((market.artificialLiquidity.short / market.artificialLiquidity.total) * 100).toFixed(0)}%
+                                  </div>
+                                  <div className="text-xs text-gray-600">
+                                    Prob: {(market.artificialLiquidity.probabilityLong * 100).toFixed(1)}% Long wins
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
                         
                         <div className="flex gap-2 mt-3">
                           <button
-                            onClick={() => takePosition(market.currency, 'long', 1, market)}
+                            onClick={() => {
+                              if (!isConnected) {
+                                setError('Please connect your wallet first')
+                                return
+                              }
+                              takePosition(market.currency, 'long', 1, market)
+                            }}
                             disabled={!isConnected || loading}
-                            className="flex-1 rounded-lg bg-green-500/20 border border-green-500/50 px-4 py-2 text-sm font-semibold text-green-400 transition hover:bg-green-500/30 disabled:opacity-50"
+                            className="flex-1 rounded-lg bg-green-500/20 border border-green-500/50 px-4 py-2 text-sm font-semibold text-green-400 transition hover:bg-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={!isConnected ? 'Connect wallet to take positions' : ''}
                           >
                             📈 Long (1 USDC)
                           </button>
                           <button
-                            onClick={() => takePosition(market.currency, 'short', 1, market)}
+                            onClick={() => {
+                              if (!isConnected) {
+                                setError('Please connect your wallet first')
+                                return
+                              }
+                              takePosition(market.currency, 'short', 1, market)
+                            }}
                             disabled={!isConnected || loading}
-                            className="flex-1 rounded-lg bg-red-500/20 border border-red-500/50 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500/30 disabled:opacity-50"
+                            className="flex-1 rounded-lg bg-red-500/20 border border-red-500/50 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={!isConnected ? 'Connect wallet to take positions' : ''}
                           >
                             📉 Short (1 USDC)
                           </button>
@@ -477,7 +850,12 @@ export default function ForexPerps() {
         {positions.size > 0 && (
           <div className="mt-8 rounded-2xl border border-laxo-border bg-laxo-card p-6">
             <h2 className="font-display text-xl font-bold text-white mb-4">
-              Your Active Positions
+              Your Positions
+              {Array.from(positions.values()).some(p => p.status === 'resolved') && (
+                <span className="ml-2 text-sm font-normal text-gray-400">
+                  ({Array.from(positions.values()).filter(p => p.status === 'active').length} active, {Array.from(positions.values()).filter(p => p.status === 'resolved').length} resolved)
+                </span>
+              )}
             </h2>
             <div className="space-y-3">
               {Array.from(positions.values()).map((position, idx) => {
@@ -520,14 +898,31 @@ export default function ForexPerps() {
                         </div>
                       </div>
                       <div className="text-right">
-                        {isWinning !== null && (
-                          <div className={`text-xs font-semibold mb-1 ${
-                            isWinning ? 'text-green-400' : 'text-red-400'
-                          }`}>
-                            {isWinning ? '✓ Winning' : '✗ Losing'}
-                          </div>
-                        )}
-                        <div className="text-xs text-gray-500">{position.status}</div>
+                          {position.status === 'resolved' ? (
+                            <>
+                              {position.payout > 0 ? (
+                                <div className="text-xs font-semibold mb-1 text-green-400">
+                                  ✓ Won: +{((position.payout / 1000000).toFixed(2))} USDC
+                                </div>
+                              ) : (
+                                <div className="text-xs font-semibold mb-1 text-red-400">
+                                  ✗ Lost
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">Resolved</div>
+                            </>
+                          ) : (
+                            <>
+                              {isWinning !== null && (
+                                <div className={`text-xs font-semibold mb-1 ${
+                                  isWinning ? 'text-green-400' : 'text-red-400'
+                                }`}>
+                                  {isWinning ? '✓ Winning' : '✗ Losing'}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-500">{position.status}</div>
+                            </>
+                          )}
                       </div>
                     </div>
                     
@@ -545,13 +940,37 @@ export default function ForexPerps() {
                               {currentPriceForCurrency ? `${currentPriceForCurrency.toFixed(4)} ${quoteCurrency}` : '--'}
                             </span>
                           </div>
-                          {position.resolutionTime && (
-                            <div className="col-span-2">
-                              <span className="text-gray-500">Resolves:</span>
-                              <span className="text-white ml-2">
-                                {new Date(position.resolutionTime * 1000).toLocaleString()}
-                              </span>
-                            </div>
+                          {position.status === 'resolved' ? (
+                            <>
+                              {position.resolutionTime && (
+                                <div className="col-span-2">
+                                  <span className="text-gray-500">Resolved at:</span>
+                                  <span className="text-white ml-2">
+                                    {new Date(position.resolvedAt * 1000).toLocaleString()}
+                                  </span>
+                                </div>
+                              )}
+                              {position.finalPrice !== undefined && (
+                                <div className="col-span-2">
+                                  <span className="text-gray-500">Final Price:</span>
+                                  <span className="text-white ml-2">
+                                    {position.finalPrice.toFixed(4)} {quoteCurrency}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            position.resolutionTime && (
+                              <div className="col-span-2">
+                                <span className="text-gray-500">Resolves:</span>
+                                <span className="text-white ml-2">
+                                  {new Date(position.resolutionTime * 1000).toLocaleString()}
+                                  {position.resolutionTime * 1000 <= Date.now() && (
+                                    <span className="ml-2 text-xs text-yellow-400">(Checking...)</span>
+                                  )}
+                                </span>
+                              </div>
+                            )
                           )}
                         </div>
                       </div>
