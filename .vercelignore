@@ -1,0 +1,21 @@
+# Contracts (not needed for frontend deployment)
+contracts/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+
+# Environment files (handled by Vercel)
+.env
+.env.local
+.env*.local
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store

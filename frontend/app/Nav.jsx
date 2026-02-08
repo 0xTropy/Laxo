@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { APP_URL } from '../lib/config'
 
 function LaxoIcon({ className }) {
@@ -15,6 +16,9 @@ function LaxoIcon({ className }) {
 
 export default function Nav() {
   const [open, setOpen] = useState(false)
+  const pathname = usePathname()
+  const isHub = pathname?.startsWith('/hub')
+  
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-laxo-border/80 bg-laxo-bg/90 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -23,15 +27,19 @@ export default function Nav() {
           Laxo
         </Link>
         <div className="hidden items-center gap-8 md:flex">
-          <Link href="#currencies" className="text-sm text-gray-400 transition hover:text-white">Currencies</Link>
-          <Link href="#how-it-works" className="text-sm text-gray-400 transition hover:text-white">How it works</Link>
-          <Link href="#integrations" className="text-sm text-gray-400 transition hover:text-white">Integrations</Link>
-          <Link
-            href={APP_URL}
-            className="rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg transition hover:bg-cyan-400"
-          >
-            Get started
-          </Link>
+          {!isHub && (
+            <>
+              <Link href="#currencies" className="text-sm text-gray-400 transition hover:text-white">Currencies</Link>
+              <Link href="#how-it-works" className="text-sm text-gray-400 transition hover:text-white">How it works</Link>
+              <Link href="#integrations" className="text-sm text-gray-400 transition hover:text-white">Integrations</Link>
+              <Link
+                href={APP_URL}
+                className="rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg transition hover:bg-cyan-400"
+              >
+                Connect Wallet
+              </Link>
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -48,16 +56,20 @@ export default function Nav() {
       </div>
       {open && (
         <div className="border-t border-laxo-border bg-laxo-bg px-6 py-4 md:hidden">
-          <Link href="#currencies" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Currencies</Link>
-          <Link href="#how-it-works" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>How it works</Link>
-          <Link href="#integrations" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Integrations</Link>
-          <Link
-            href={APP_URL}
-            className="mt-2 inline-block rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg"
-            onClick={() => setOpen(false)}
-          >
-            Get started
-          </Link>
+          {!isHub && (
+            <>
+              <Link href="#currencies" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Currencies</Link>
+              <Link href="#how-it-works" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>How it works</Link>
+              <Link href="#integrations" className="block py-2 text-gray-400 hover:text-white" onClick={() => setOpen(false)}>Integrations</Link>
+              <Link
+                href={APP_URL}
+                className="mt-2 inline-block rounded-full bg-laxo-accent px-5 py-2.5 text-sm font-semibold text-laxo-bg"
+                onClick={() => setOpen(false)}
+              >
+                Connect Wallet
+              </Link>
+            </>
+          )}
         </div>
       )}
     </nav>
